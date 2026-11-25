@@ -1,0 +1,332 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile storing basic identity and role.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "teacher", "principal"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "role", "createdAt"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Authorized teacher or principal record granting dashboard privileges.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "enum": ["teacher", "principal"]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "name", "role", "subject", "createdAt"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Official coaching notice published by the Principal or Teachers.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 180
+        },
+        "body": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "category": {
+          "type": "string",
+          "enum": ["পরীক্ষা", "ছুটি", "ভর্তি", "সাধারণ"]
+        },
+        "targetClass": {
+          "type": "string",
+          "enum": ["সকল শ্রেণি", "৬ষ্ঠ", "৭ম", "৮ম", "৯ম", "১০ম", "একাদশ"]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "publishedDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["title", "body", "category", "targetClass", "pinned", "authorId", "authorName", "publishedDate", "createdAt"]
+    },
+    "Routine": {
+      "title": "Routine",
+      "description": "Weekly class routine schedule entry for Class 6 to Class 11.",
+      "type": "object",
+      "properties": {
+        "classLevel": {
+          "type": "string",
+          "enum": ["৬ষ্ঠ", "৭ম", "৮ম", "৯ম", "১০ম", "একাদশ"]
+        },
+        "group": {
+          "type": "string",
+          "enum": ["সাধারণ", "বিজ্ঞান", "মানবিক", "ব্যবসায় শিক্ষা"]
+        },
+        "day": {
+          "type": "string",
+          "enum": ["শনিবার", "রবিবার", "সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার"]
+        },
+        "timeSlot": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 60
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "teacherName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "room": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["classLevel", "group", "day", "timeSlot", "subject", "teacherName", "room", "authorId", "createdAt"]
+    },
+    "Admission": {
+      "title": "Admission",
+      "description": "Student online admission record and enrollment metadata.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "rollNumber": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^USP-[0-9A-Z\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "guardianName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "guardianPhone": {
+          "type": "string",
+          "minLength": 11,
+          "maxLength": 15,
+          "pattern": "^01[3-9][0-9]{8}$"
+        },
+        "schoolName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 150
+        },
+        "classLevel": {
+          "type": "string",
+          "enum": ["৬ষ্ঠ", "৭ম", "৮ম", "৯ম", "১০ম", "একাদশ"]
+        },
+        "group": {
+          "type": "string",
+          "enum": ["সাধারণ", "বিজ্ঞান", "মানবিক", "ব্যবসায় শিক্ষা"]
+        },
+        "batchShift": {
+          "type": "string",
+          "enum": ["সকাল (৭:৩০ - ১০:৩০)", "বিকাল (৩:০০ - ৬:০০)", "সন্ধ্যা (৬:১৫ - ৮:৪৫)"]
+        },
+        "monthlyFee": {
+          "type": "number"
+        },
+        "admissionFee": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["unpaid", "paid", "verified"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "rollNumber", "studentName", "guardianName", "guardianPhone", "schoolName", "classLevel", "group", "batchShift", "monthlyFee", "admissionFee", "status", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Online admission and tuition payment transaction record.",
+      "type": "object",
+      "properties": {
+        "admissionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "rollNumber": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^USP-[0-9A-Z\\-]+$"
+        },
+        "classLevel": {
+          "type": "string",
+          "enum": ["৬ষ্ঠ", "৭ম", "৮ম", "৯ম", "১০ম", "একাদশ"]
+        },
+        "amount": {
+          "type": "number"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["bKash", "Nagad", "Rocket", "Card"]
+        },
+        "senderNumber": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 24
+        },
+        "transactionId": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 40,
+          "pattern": "^[A-Za-z0-9\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "verified", "refunded"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["admissionId", "ownerId", "studentName", "rollNumber", "classLevel", "amount", "method", "senderNumber", "transactionId", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profiles."
+    },
+    "/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Authorized teachers and principal access control records."
+    },
+    "/notices/{noticeId}": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "Public notice board entries posted by Principal or Teachers."
+    },
+    "/routines/{routineId}": {
+      "schema": { "$ref": "#/entities/Routine" },
+      "description": "Public weekly class routine schedules for Class 6 to Class 11."
+    },
+    "/admissions/{admissionId}": {
+      "schema": { "$ref": "#/entities/Admission" },
+      "description": "Student online admission records and enrollment status."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Online payment gateway transactions linked to admissions."
+    }
+  }
+}

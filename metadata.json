@@ -1,0 +1,8 @@
+{
+  "name": "আপগ্রেড স্টাডি প্রোগ্রাম (USP)",
+  "description": "ক্লাস ৬ষ্ঠ থেকে একাদশ শ্রেণির শিক্ষার্থীদের জন্য অনলাইন ভর্তি, ক্লাস রুটিন, নোটিশ বোর্ড, পেমেন্ট গেটওয়ে এবং শিক্ষক-প্রধান শিক্ষক ব্যবস্থাপনা পোর্টাল।",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
