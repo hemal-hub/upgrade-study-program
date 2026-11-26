@@ -20,6 +20,7 @@ import {
   googleProvider,
 } from '../firebase/config';
 import {
+  addStaffInviteInFirestore,
   addStaffMemberInFirestore,
   createAdmissionAndPaymentInFirestore,
   createNoticeInFirestore,
@@ -29,6 +30,7 @@ import {
   deleteRoutineInFirestore,
   ensureUserProfile,
   publishBatchResultsInFirestore,
+  removeStaffInviteInFirestore,
   removeStaffMemberInFirestore,
   saveSiteSettingsInFirestore,
   subscribeAdmissions,
@@ -37,6 +39,7 @@ import {
   subscribePublicResults,
   subscribePublicRoutines,
   subscribePublicSiteSettings,
+  subscribeStaffInvites,
   subscribeStaffMembers,
   updateAdmissionStatusInFirestore,
   updatePaymentStatusInFirestore,
@@ -65,6 +68,8 @@ import type {
   RoutineFormInput,
   SiteSettings,
   StaffFormInput,
+  StaffInvite,
+  StaffInviteFormInput,
   StaffMember,
   StudentResult,
   TransactionStatus,
@@ -76,9 +81,12 @@ import {
   canAccessDashboard,
   canManageStaff,
   generateRollNumber,
+  maskEmailAddress,
   resolveLoginEmail,
   sanitizeText,
   toBengaliDigits,
+  validatePasswordResetInput,
+  validateStaffInviteInput,
   validateUsernameChange,
 } from '../utils/academicLogic';
 
@@ -90,6 +98,9 @@ function formatFirebaseAuthError(error: unknown): string {
 
   if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
     return 'ইউজারনেম/ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'প্রদত্ত ইমেইল ঠিকানাটি সঠিক নয়। অনুগ্রহ করে সঠিক ইমেইল লিখুন।';
   }
   if (code === 'auth/operation-not-allowed') {
     return 'Firebase Console → Authentication → Sign-in method থেকে "Email/Password" চালু করা নেই। অনুগ্রহ করে সেটি Enable করুন।';
@@ -108,7 +119,10 @@ function formatFirebaseAuthError(error: unknown): string {
     return 'পাসওয়ার্ডটি খুবই দুর্বল। কমপক্ষে ৮ অক্ষরের শক্তিশালী পাসওয়ার্ড দিন।';
   }
   if (code === 'auth/too-many-requests') {
-    return 'অতিরিক্ত চেষ্টার কারণে সাময়িকভাবে লগইন স্থগিত আছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+    return 'অতিরিক্ত চেষ্টার কারণে সাময়িকভাবে অনুরোধ স্থগিত আছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'ইন্টারনেট সংযোগে সমস্যা হয়েছে। সংযোগ যাচাই করে আবার চেষ্টা করুন।';
   }
   if (code === 'auth/requires-recent-login') {
     return 'নিরাপত্তার জন্য অনুগ্রহ করে একবার লগআউট করে পুনরায় লগইন করুন এবং আবার চেষ্টা করুন।';
@@ -133,14 +147,17 @@ interface AppContextValue {
   userRole: UserRole;
   hasStaffAccess: boolean;
   isPrincipalAccess: boolean;
+  isRootAdmin: boolean;
   hasPasswordProvider: boolean;
   isCloudSynced: boolean;
   authError: string | null;
   clearAuthError: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithUsernameOrEmail: (identifier: string, password: string) => Promise<string | null>;
-  setupPrincipalPasswordAccount: (password: string) => Promise<string | null>;
-  sendPasswordReset: (identifier: string) => Promise<string | null>;
+  setupPrincipalPasswordAccount: (identifier: string, password: string) => Promise<string | null>;
+  sendPasswordReset: (
+    identifier: string,
+  ) => Promise<{ ok: boolean; maskedEmail?: string; error?: string }>;
   resendVerificationEmail: () => Promise<void>;
   refreshAuthUser: () => Promise<void>;
   changeAccountPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
@@ -154,6 +171,7 @@ interface AppContextValue {
   admissions: AdmissionRecord[];
   payments: PaymentRecord[];
   staffMembers: StaffMember[];
+  staffInvites: StaffInvite[];
   submitAdmissionWithPayment: (
     admissionInput: AdmissionFormInput,
     paymentInput: PaymentFormInput,
@@ -176,6 +194,8 @@ interface AppContextValue {
   ) => Promise<void>;
   addStaffMember: (input: StaffFormInput) => Promise<void>;
   removeStaffMember: (uid: string) => Promise<void>;
+  addStaffInvite: (input: StaffInviteFormInput) => Promise<string | null>;
+  removeStaffInvite: (inviteId: string) => Promise<void>;
   toast: ToastMessage | null;
   dismissToast: () => void;
 }
@@ -219,6 +239,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [cloudAdmissions, setCloudAdmissions] = useState<AdmissionRecord[]>([]);
   const [cloudPayments, setCloudPayments] = useState<PaymentRecord[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [staffInvites, setStaffInvites] = useState<StaffInvite[]>([]);
 
   // Local lists (Notice & Results intentionally start empty until explicitly published!)
   const [localNotices, setLocalNotices] = useState<NoticeItem[]>(SEED_NOTICES);
@@ -294,33 +315,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Subscribe to private admissions, payments, and staff ONLY when authenticated
+  const isRootAdmin = Boolean(
+    user?.emailVerified && user.email?.toLowerCase() === BOOTSTRAP_PRINCIPAL_EMAIL.toLowerCase(),
+  );
+  const isCloudSynced = Boolean(user);
+  const hasPasswordProvider = Boolean(
+    user?.providerData?.some((provider) => provider.providerId === 'password'),
+  );
+  const hasStaffAccess = canAccessDashboard(
+    Boolean(user),
+    Boolean(user?.emailVerified),
+    userRole,
+  );
+  const isPrincipalAccess = canManageStaff(
+    Boolean(user),
+    Boolean(user?.emailVerified),
+    userRole,
+  );
+
+  // Subscribe to private admissions, payments, and admin registries ONLY when authenticated
   useEffect(() => {
     if (!authReady || !user) {
       setCloudAdmissions([]);
       setCloudPayments([]);
       setStaffMembers([]);
+      setStaffInvites([]);
       return;
     }
 
-    const isBootstrapPrincipal =
-      Boolean(user.emailVerified) && user.email === BOOTSTRAP_PRINCIPAL_EMAIL;
-
     const unsubAdmissions = subscribeAdmissions(
       user,
-      isBootstrapPrincipal,
+      hasStaffAccess,
       (items) => setCloudAdmissions(items),
       () => {},
     );
     const unsubPayments = subscribePayments(
       user,
-      isBootstrapPrincipal,
+      hasStaffAccess,
       (items) => setCloudPayments(items),
       () => {},
     );
-    const unsubStaff = isBootstrapPrincipal
+    const unsubStaff = isRootAdmin
       ? subscribeStaffMembers(
           (items) => setStaffMembers(items),
+          () => {},
+        )
+      : undefined;
+    const unsubInvites = isRootAdmin
+      ? subscribeStaffInvites(
+          (items) => setStaffInvites(items),
           () => {},
         )
       : undefined;
@@ -329,8 +372,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       unsubAdmissions();
       unsubPayments();
       unsubStaff?.();
+      unsubInvites?.();
     };
-  }, [authReady, user]);
+  }, [authReady, hasStaffAccess, isRootAdmin, user]);
 
   // Merge cloud records without duplicating IDs
   const notices = useMemo(() => {
@@ -367,21 +411,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const item of cloudPayments) map.set(item.id, item);
     return Array.from(map.values());
   }, [localPayments, cloudPayments]);
-
-  const isCloudSynced = Boolean(user);
-  const hasPasswordProvider = Boolean(
-    user?.providerData?.some((provider) => provider.providerId === 'password'),
-  );
-  const hasStaffAccess = canAccessDashboard(
-    Boolean(user),
-    Boolean(user?.emailVerified),
-    userRole,
-  );
-  const isPrincipalAccess = canManageStaff(
-    Boolean(user),
-    Boolean(user?.emailVerified),
-    userRole,
-  );
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
@@ -428,21 +457,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setupPrincipalPasswordAccount = useCallback(
-    async (password: string): Promise<string | null> => {
+    async (identifier: string, password: string): Promise<string | null> => {
       setAuthError(null);
+      const resolvedEmail = resolveLoginEmail(
+        identifier,
+        siteSettings.adminUsername,
+        BOOTSTRAP_PRINCIPAL_EMAIL,
+      );
+      if (!resolvedEmail) {
+        const msg = 'সঠিক ইমেইল ঠিকানা (অথবা মূল অ্যাডমিনের ইউজারনেম) লিখুন।';
+        setAuthError(msg);
+        return msg;
+      }
+
       try {
-        const cred = await createUserWithEmailAndPassword(
-          auth,
-          BOOTSTRAP_PRINCIPAL_EMAIL,
-          password,
-        );
+        const cred = await createUserWithEmailAndPassword(auth, resolvedEmail, password);
         try {
           await sendEmailVerification(cred.user);
         } catch {
           // Non-fatal if verification email rate-limited
         }
+        const masked = maskEmailAddress(resolvedEmail);
         showToast(
-          `অ্যাডমিন পাসওয়ার্ড তৈরি হয়েছে। ${BOOTSTRAP_PRINCIPAL_EMAIL} ইমেইলে পাঠানো ভেরিফিকেশন লিংকে ক্লিক করুন।`,
+          `পাসওয়ার্ড তৈরি হয়েছে। ${masked} ইমেইলে পাঠানো ভেরিফিকেশন লিংকে ক্লিক করুন।`,
           'success',
         );
         return null;
@@ -452,35 +489,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return msg;
       }
     },
-    [showToast],
+    [showToast, siteSettings.adminUsername],
   );
 
   const sendPasswordReset = useCallback(
-    async (identifier: string): Promise<string | null> => {
+    async (
+      identifier: string,
+    ): Promise<{ ok: boolean; maskedEmail?: string; error?: string }> => {
       setAuthError(null);
-      const target = identifier.trim() || siteSettings.adminUsername || 'admin';
+      const validation = validatePasswordResetInput(identifier);
+      if (!validation.valid) {
+        const msg =
+          validation.errors.identifier ||
+          'পাসওয়ার্ড রিসেট করতে আপনার নিবন্ধিত ইমেইল অথবা ইউজারনেম লিখুন।';
+        setAuthError(msg);
+        return { ok: false, error: msg };
+      }
+
       const resolvedEmail = resolveLoginEmail(
-        target,
+        identifier,
         siteSettings.adminUsername,
         BOOTSTRAP_PRINCIPAL_EMAIL,
       );
       if (!resolvedEmail) {
-        const msg = 'সঠিক ইউজারনেম বা ইমেইল দিন যেন পাসওয়ার্ড সেট/রিসেট লিংক পাঠানো যায়।';
+        const msg =
+          'এই ইউজারনেমটি খুঁজে পাওয়া যায়নি। আপনার নিবন্ধিত ইমেইল ঠিকানা অথবা সঠিক অ্যাডমিন ইউজারনেম দিন।';
         setAuthError(msg);
-        return msg;
+        return { ok: false, error: msg };
       }
+
+      const maskedEmail = maskEmailAddress(resolvedEmail);
 
       try {
         await sendPasswordResetEmail(auth, resolvedEmail);
         showToast(
-          `${resolvedEmail} ইমেইলে পাসওয়ার্ড সেট/রিসেট লিংক পাঠানো হয়েছে। ইনবক্স বা স্প্যাম ফোল্ডার চেক করুন।`,
+          `${maskedEmail} ইমেইলে পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে। ইনবক্স ও স্প্যাম ফোল্ডার চেক করুন।`,
           'success',
         );
-        return null;
+        return { ok: true, maskedEmail };
       } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code ?? '')
+            : '';
+        // Prevent account enumeration for unregistered email addresses
+        if (code === 'auth/user-not-found') {
+          showToast(
+            `এই ঠিকানায় অ্যাকাউন্ট নিবন্ধিত থাকলে ${maskedEmail} ইমেইলে পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে।`,
+            'info',
+          );
+          return { ok: true, maskedEmail };
+        }
         const msg = formatFirebaseAuthError(error);
         setAuthError(msg);
-        return msg;
+        return { ok: false, error: msg };
       }
     },
     [showToast, siteSettings.adminUsername],
@@ -564,8 +626,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const updateAdminUsername = useCallback(
     async (newUsername: string): Promise<string | null> => {
-      if (!user || !isPrincipalAccess) {
-        return 'শুধুমাত্র প্রধান শিক্ষক অ্যাডমিন ইউজারনেম পরিবর্তন করতে পারবেন।';
+      if (!user || !isRootAdmin) {
+        return 'শুধুমাত্র মূল অ্যাডমিন (প্রধান শিক্ষক) অ্যাডমিন ইউজারনেম পরিবর্তন করতে পারবেন।';
       }
       const validation = validateUsernameChange(newUsername);
       if (!validation.valid) {
@@ -585,7 +647,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return 'ইউজারনেম সংরক্ষণ করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।';
       }
     },
-    [isPrincipalAccess, showToast, siteSettings, user],
+    [isRootAdmin, showToast, siteSettings, user],
   );
 
   const signOutUser = useCallback(async () => {
@@ -947,26 +1009,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addStaffMember = useCallback(
     async (input: StaffFormInput) => {
-      if (!user || !isPrincipalAccess) {
-        showToast('শুধুমাত্র প্রধান শিক্ষক নতুন শিক্ষক যুক্ত করতে পারবেন।', 'error');
+      if (!user || !isRootAdmin) {
+        showToast('শুধুমাত্র মূল অ্যাডমিন নতুন শিক্ষক/অ্যাডমিন যুক্ত করতে পারবেন।', 'error');
         return;
       }
       await addStaffMemberInFirestore(input);
-      showToast(`${input.name}-কে সফলভাবে অনুমোদিত শিক্ষক তালিকায় যুক্ত করা হয়েছে।`, 'success');
+      showToast(`${input.name}-কে সফলভাবে অনুমোদিত তালিকায় যুক্ত করা হয়েছে।`, 'success');
     },
-    [isPrincipalAccess, showToast, user],
+    [isRootAdmin, showToast, user],
   );
 
   const removeStaffMember = useCallback(
     async (uid: string) => {
-      if (!user || !isPrincipalAccess) {
-        showToast('শুধুমাত্র প্রধান শিক্ষক এই পরিবর্তন করতে পারবেন।', 'error');
+      if (!user || !isRootAdmin) {
+        showToast('শুধুমাত্র মূল অ্যাডমিন এই পরিবর্তন করতে পারবেন।', 'error');
         return;
       }
       await removeStaffMemberInFirestore(uid);
-      showToast('শিক্ষকের ড্যাশবোর্ড অ্যাক্সেস প্রত্যাহার করা হয়েছে।', 'info');
+      showToast('অ্যাকাউন্টের ড্যাশবোর্ড অ্যাক্সেস প্রত্যাহার করা হয়েছে।', 'info');
     },
-    [isPrincipalAccess, showToast, user],
+    [isRootAdmin, showToast, user],
+  );
+
+  const addStaffInvite = useCallback(
+    async (input: StaffInviteFormInput): Promise<string | null> => {
+      if (!user || !isRootAdmin) {
+        const msg = 'শুধুমাত্র মূল অ্যাডমিন নতুন অ্যাডমিন ইমেইল যুক্ত করতে পারবেন।';
+        showToast(msg, 'error');
+        return msg;
+      }
+      const validation = validateStaffInviteInput(input, BOOTSTRAP_PRINCIPAL_EMAIL);
+      if (!validation.valid) {
+        return Object.values(validation.errors)[0] || 'সঠিক তথ্য দিন।';
+      }
+      try {
+        await addStaffInviteInFirestore(input, user.uid);
+        showToast(
+          `${input.email.trim().toLowerCase()}-কে সহকারী অ্যাডমিন হিসেবে অনুমোদন দেওয়া হয়েছে।`,
+          'success',
+        );
+        return null;
+      } catch {
+        const msg = 'অ্যাডমিন ইমেইল সংরক্ষণ করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।';
+        showToast(msg, 'error');
+        return msg;
+      }
+    },
+    [isRootAdmin, showToast, user],
+  );
+
+  const removeStaffInvite = useCallback(
+    async (inviteId: string) => {
+      if (!user || !isRootAdmin) {
+        showToast('শুধুমাত্র মূল অ্যাডমিন অনুমোদন বাতিল করতে পারবেন।', 'error');
+        return;
+      }
+      await removeStaffInviteInFirestore(inviteId);
+      showToast('সহকারী অ্যাডমিনের ড্যাশবোর্ড অনুমোদন বাতিল করা হয়েছে।', 'info');
+    },
+    [isRootAdmin, showToast, user],
   );
 
   const value: AppContextValue = {
@@ -980,6 +1081,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     userRole,
     hasStaffAccess,
     isPrincipalAccess,
+    isRootAdmin,
     hasPasswordProvider,
     isCloudSynced,
     authError,
@@ -1001,6 +1103,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     admissions,
     payments,
     staffMembers,
+    staffInvites,
     submitAdmissionWithPayment,
     publishNotice,
     removeNotice,
@@ -1012,6 +1115,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updatePaymentStatus,
     addStaffMember,
     removeStaffMember,
+    addStaffInvite,
+    removeStaffInvite,
     toast,
     dismissToast,
   };

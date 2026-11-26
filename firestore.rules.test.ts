@@ -37,6 +37,7 @@ test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
   const validators = [
     'isValidUserProfile',
     'isValidStaffMember',
+    'isValidStaffInvite',
     'isValidNotice',
     'isValidRoutine',
     'isValidAdmission',
@@ -47,4 +48,6 @@ test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
   for (const fn of validators) {
     assert.ok(rulesContent.includes(`function ${fn}(data)`), `Missing validator ${fn}`);
   }
+  assert.match(rulesContent, /existing\(\)\.email == request\.auth\.token\.email\.lower\(\)/);
 });
+

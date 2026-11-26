@@ -9,8 +9,7 @@ import {
 export function AdminAccountSecurityTab() {
   const {
     user,
-    userRole,
-    isPrincipalAccess,
+    isRootAdmin,
     hasPasswordProvider,
     siteSettings,
     updateAdminUsername,
@@ -107,19 +106,23 @@ export function AdminAccountSecurityTab() {
             </p>
           </div>
           <span className="text-xs font-semibold text-[#15803D] bg-[#F0FDF4] border border-[#BBF7D0] rounded-lg px-3 py-1.5 w-fit">
-            {userRole === 'principal' ? 'প্রধান শিক্ষক অ্যাকাউন্ট' : 'শিক্ষক অ্যাকাউন্ট'}
+            {isRootAdmin ? 'মূল অ্যাডমিন (প্রধান শিক্ষক)' : 'সহকারী অ্যাডমিন (নিজস্ব ইমেইল লগইন)'}
           </span>
         </div>
 
-        <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+        <dl
+          className={`grid grid-cols-1 ${isRootAdmin ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4 text-sm`}
+        >
+          {isRootAdmin && (
+            <div className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-3.5">
+              <dt className="text-xs text-[#78716C]">বর্তমান মূল অ্যাডমিন ইউজারনেম</dt>
+              <dd className="font-mono-tabular font-bold text-[#7A0D14] mt-1">
+                {siteSettings.adminUsername || 'admin'}
+              </dd>
+            </div>
+          )}
           <div className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-3.5">
-            <dt className="text-xs text-[#78716C]">বর্তমান অ্যাডমিন ইউজারনেম</dt>
-            <dd className="font-mono-tabular font-bold text-[#7A0D14] mt-1">
-              {siteSettings.adminUsername || 'admin'}
-            </dd>
-          </div>
-          <div className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-3.5">
-            <dt className="text-xs text-[#78716C]">নিবন্ধিত ইমেইল</dt>
+            <dt className="text-xs text-[#78716C]">আপনার লগইন ইমেইল</dt>
             <dd className="font-mono-tabular font-semibold text-[#1C1917] mt-1 truncate">
               {user?.email || '—'}
             </dd>
@@ -134,8 +137,8 @@ export function AdminAccountSecurityTab() {
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* 1. Change Admin Username (Principal Only) */}
-        {isPrincipalAccess && (
+        {/* 1. Change Admin Username (Root Admin Only) */}
+        {isRootAdmin && (
           <form
             onSubmit={handleUsernameSubmit}
             noValidate
@@ -197,7 +200,7 @@ export function AdminAccountSecurityTab() {
           onSubmit={handlePasswordSubmit}
           noValidate
           className={`bg-white border border-[#E7E2DA] rounded-2xl p-5 sm:p-6 space-y-5 ${
-            isPrincipalAccess ? '' : 'lg:col-span-2 max-w-xl'
+            isRootAdmin ? '' : 'lg:col-span-2 max-w-xl'
           }`}
         >
           <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#F0EBE3]">

@@ -217,6 +217,23 @@ export interface StaffFormInput {
   subject: string;
 }
 
+export interface StaffInvite {
+  id: string;
+  email: string;
+  name: string;
+  role: 'teacher' | 'principal';
+  subject: string;
+  createdBy: string;
+  createdAt?: string;
+}
+
+export interface StaffInviteFormInput {
+  email: string;
+  name: string;
+  role: 'teacher' | 'principal';
+  subject: string;
+}
+
 export interface AdmissionFormInput {
   studentName: string;
   fatherName: string;

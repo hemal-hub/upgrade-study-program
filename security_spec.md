@@ -21,3 +21,6 @@
 10. **PII Cross-Read**: Student A attempting `get` on Student B's `/admissions/adm_b` containing guardian phone number.
 11. **Value Poisoning on Update**: Updating `status` on `/admissions/adm1` to an invalid type (`12345`) or unallowed enum (`"super_approved"`).
 12. **Denial-of-Wallet Oversized String**: Creating `/notices/n1` with a 10,000-character `body` exceeding the 2000-char limit.
+13. **Delegated Admin Escalation on `/staff_invites`**: A delegated admin attempting to create, update, list, or delete `/staff_invites/{inviteId}` — must be rejected because only `isBootstrapPrincipal()` can manage admin authorizations.
+14. **Invite Email Mismatch / Collision Spoof**: An attacker with email `a_b@gmail.com` attempting to read or claim an invite created for `a.b@gmail.com` — blocked by exact `existing().email == request.auth.token.email.lower()` equality check plus `email_verified == true`.
+

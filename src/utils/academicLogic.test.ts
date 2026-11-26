@@ -6,6 +6,7 @@ import {
   canAccessDashboard,
   canManageStaff,
   computeDashboardMetrics,
+  emailToInviteId,
   filterAndSortNotices,
   filterAndSortRoutines,
   findStudentAdmission,
@@ -13,20 +14,24 @@ import {
   generateRollNumber,
   getAllowedGroupsForClass,
   groupStudentsByClass,
+  maskEmailAddress,
   rankResultsWithMerit,
   resolveLoginEmail,
   ROLL_NUMBER_REGEX,
   toBengaliDigits,
   validateAdmissionInput,
   validateCustomSectionInput,
+  validateFirstTimeSetupInput,
   validateLoginCredentials,
   validateNoticeInput,
   validatePasswordChange,
+  validatePasswordResetInput,
   validatePaymentInput,
   validateResultInput,
   validateRoutineInput,
   validateSiteSettingsInput,
   validateStaffInput,
+  validateStaffInviteInput,
   validateUsernameChange,
 } from './academicLogic';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
@@ -488,4 +493,76 @@ test('username alias resolution and password/username change validators enforce 
     true,
   );
 });
+
+test('forgot-password validator rejects empty/malformed inputs and masks resolved emails safely', () => {
+  assert.equal(validatePasswordResetInput('').valid, false);
+  assert.equal(validatePasswordResetInput('   ').valid, false);
+  assert.equal(validatePasswordResetInput('ab').valid, false);
+  assert.equal(validatePasswordResetInput('bad@@email').valid, false);
+  assert.equal(validatePasswordResetInput('user@invalid').valid, false);
+  assert.equal(validatePasswordResetInput('admin').valid, true);
+  assert.equal(validatePasswordResetInput('teacher@usp-academy.edu.bd').valid, true);
+
+  assert.equal(maskEmailAddress('dark24dark24dark@gmail.com'), 'da***k@gmail.com');
+  assert.equal(maskEmailAddress('ab@edu.bd'), 'a***@edu.bd');
+  assert.equal(maskEmailAddress('not-an-email'), 'not-an-email');
+});
+
+test('email-based delegated admin invite helpers validate and normalize cleanly', () => {
+  assert.equal(emailToInviteId(' Manager.USP+1@Gmail.com '), 'manager_usp_1_gmail_com');
+
+  // Reject root admin email re-invite and malformed inputs
+  assert.equal(
+    validateStaffInviteInput(
+      {
+        email: 'dark24dark24dark@gmail.com',
+        name: 'মূল অ্যাডমিন',
+        role: 'teacher',
+        subject: 'অফিস',
+      },
+      'dark24dark24dark@gmail.com',
+    ).valid,
+    false,
+  );
+  assert.equal(
+    validateStaffInviteInput(
+      { email: 'bad-email', name: 'র', role: 'teacher', subject: '' },
+      'dark24dark24dark@gmail.com',
+    ).valid,
+    false,
+  );
+  assert.equal(
+    validateStaffInviteInput(
+      {
+        email: 'assistant.admin@gmail.com',
+        name: 'মো. রহিম উদ্দিন',
+        role: 'teacher',
+        subject: 'অফিস অ্যাডমিন ও ভর্তি',
+      },
+      'dark24dark24dark@gmail.com',
+    ).valid,
+    true,
+  );
+
+  // First-time setup validates own email + password + confirm
+  assert.equal(validateFirstTimeSetupInput('', 'StrongPass12', 'StrongPass12').valid, false);
+  assert.equal(
+    validateFirstTimeSetupInput('assistant@gmail.com', 'short', 'short').valid,
+    false,
+  );
+  assert.equal(
+    validateFirstTimeSetupInput('assistant@gmail.com', 'StrongPass12', 'Mismatch12').valid,
+    false,
+  );
+  assert.equal(
+    validateFirstTimeSetupInput('assistant@gmail.com', 'StrongPass12', 'StrongPass12').valid,
+    true,
+  );
+  assert.equal(
+    validateFirstTimeSetupInput('admin', 'StrongPass12', 'StrongPass12').valid,
+    true,
+  );
+});
+
+
 

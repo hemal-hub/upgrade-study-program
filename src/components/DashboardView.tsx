@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Award,
   Bell,
   Calendar,
@@ -31,6 +32,7 @@ import { AdminCmsTab } from './admin/AdminCmsTab';
 import { AdminResultsTab } from './admin/AdminResultsTab';
 import { AdminStudentListTab } from './admin/AdminStudentListTab';
 import { createStudentAvatarSvg } from '../utils/imageUtils';
+import { BOOTSTRAP_PRINCIPAL_EMAIL } from '../firebase/config';
 import type {
   AcademicGroup,
   ClassLevel,
@@ -40,6 +42,7 @@ import type {
   NoticeTargetClass,
   RoutineFormInput,
   StaffFormInput,
+  StaffInviteFormInput,
   TransactionStatus,
 } from '../types';
 import {
@@ -52,10 +55,13 @@ import {
   getAllowedGroupsForClass,
   NOTICE_CATEGORIES,
   toBengaliDigits,
+  validateFirstTimeSetupInput,
   validateLoginCredentials,
   validateNoticeInput,
+  validatePasswordResetInput,
   validateRoutineInput,
   validateStaffInput,
+  validateStaffInviteInput,
 } from '../utils/academicLogic';
 
 type DashboardTab =
@@ -86,9 +92,8 @@ export function DashboardView() {
   const {
     user,
     authReady,
-    userRole,
     hasStaffAccess,
-    isPrincipalAccess,
+    isRootAdmin,
     authError,
     clearAuthError,
     siteSettings,
@@ -105,6 +110,7 @@ export function DashboardView() {
     routines,
     notices,
     staffMembers,
+    staffInvites,
     publishNotice,
     removeNotice,
     publishRoutine,
@@ -113,6 +119,8 @@ export function DashboardView() {
     updatePaymentStatus,
     addStaffMember,
     removeStaffMember,
+    addStaffInvite,
+    removeStaffInvite,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -144,7 +152,18 @@ export function DashboardView() {
   const [noticeErrors, setNoticeErrors] = useState<Record<string, string>>({});
   const [savingNotice, setSavingNotice] = useState(false);
 
-  // Principal Staff Management form state
+  // Root Admin: Email-based Assistant Admin Invite form state
+  const [inviteForm, setInviteForm] = useState<StaffInviteFormInput>({
+    email: '',
+    name: '',
+    role: 'teacher',
+    subject: '',
+  });
+  const [inviteErrors, setInviteErrors] = useState<Record<string, string>>({});
+  const [inviteApiError, setInviteApiError] = useState('');
+  const [savingInvite, setSavingInvite] = useState(false);
+
+  // Legacy UID-based Staff Management form state (optional fallback)
   const [staffForm, setStaffForm] = useState<StaffFormInput>({
     uid: '',
     name: '',
@@ -155,7 +174,7 @@ export function DashboardView() {
   const [savingStaff, setSavingStaff] = useState(false);
   const [copiedUid, setCopiedUid] = useState(false);
 
-  // Dashboard login form state (Username/Email + Password + Setup/Reset)
+  // Dashboard login form state (Username/Email + Password + Setup/Forgot Password)
   const [loginMode, setLoginMode] = useState<'signin' | 'setup' | 'reset'>('signin');
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -164,16 +183,27 @@ export function DashboardView() {
   const [loginErrors, setLoginErrors] = useState<Record<string, string>>({});
   const [loginFeedback, setLoginFeedback] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
+  const [resetSentTarget, setResetSentTarget] = useState<string | null>(null);
+  const [resetCooldownSec, setResetCooldownSec] = useState(0);
+  const loginIdentifierInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (resetCooldownSec <= 0) return;
+    const timer = window.setTimeout(() => {
+      setResetCooldownSec((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [resetCooldownSec]);
 
   const sidebarItems = useMemo(
     () =>
-      isPrincipalAccess
+      isRootAdmin
         ? [
             ...BASE_SIDEBAR_ITEMS,
-            { id: 'staff' as DashboardTab, label: 'শিক্ষক ব্যবস্থাপনা', icon: UserPlus },
+            { id: 'staff' as DashboardTab, label: 'অ্যাডমিন ব্যবস্থাপনা', icon: UserPlus },
           ]
         : BASE_SIDEBAR_ITEMS,
-    [isPrincipalAccess],
+    [isRootAdmin],
   );
 
   const metrics = useMemo(
@@ -246,6 +276,26 @@ export function DashboardView() {
     }
   };
 
+  const handleInviteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteApiError('');
+    const validation = validateStaffInviteInput(inviteForm, BOOTSTRAP_PRINCIPAL_EMAIL);
+    setInviteErrors(validation.errors);
+    if (!validation.valid) return;
+
+    setSavingInvite(true);
+    try {
+      const err = await addStaffInvite(inviteForm);
+      if (err) {
+        setInviteApiError(err);
+      } else {
+        setInviteForm({ email: '', name: '', role: 'teacher', subject: '' });
+      }
+    } finally {
+      setSavingInvite(false);
+    }
+  };
+
   const handleStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const validation = validateStaffInput(staffForm);
@@ -285,6 +335,19 @@ export function DashboardView() {
     );
   }
 
+  const switchLoginMode = (nextMode: 'signin' | 'setup' | 'reset', focusIdentifier = false) => {
+    setLoginMode(nextMode);
+    setLoginErrors({});
+    setLoginFeedback('');
+    setResetSentTarget(null);
+    clearAuthError();
+    if (focusIdentifier) {
+      window.setTimeout(() => {
+        loginIdentifierInputRef.current?.focus();
+      }, 0);
+    }
+  };
+
   const handlePasswordLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearAuthError();
@@ -310,19 +373,22 @@ export function DashboardView() {
     }
 
     if (loginMode === 'setup') {
-      const nextErrs: Record<string, string> = {};
-      if (loginPassword.length < 8) {
-        nextErrs.password = 'নতুন পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে।';
+      const setupValidation = validateFirstTimeSetupInput(
+        loginIdentifier,
+        loginPassword,
+        setupConfirmPassword,
+      );
+      setLoginErrors(setupValidation.errors);
+      if (!setupValidation.valid) {
+        if (setupValidation.errors.identifier) {
+          loginIdentifierInputRef.current?.focus();
+        }
+        return;
       }
-      if (loginPassword !== setupConfirmPassword) {
-        nextErrs.confirmPassword = 'পাসওয়ার্ড দুটি মেলেনি।';
-      }
-      setLoginErrors(nextErrs);
-      if (Object.keys(nextErrs).length > 0) return;
 
       setLoggingIn(true);
       try {
-        const err = await setupPrincipalPasswordAccount(loginPassword);
+        const err = await setupPrincipalPasswordAccount(loginIdentifier, loginPassword);
         if (err) {
           setLoginFeedback(err);
         } else {
@@ -335,20 +401,29 @@ export function DashboardView() {
       return;
     }
 
+    // Forgot Password / Reset flow
+    const resetValidation = validatePasswordResetInput(loginIdentifier);
+    setLoginErrors(resetValidation.errors);
+    if (!resetValidation.valid) {
+      loginIdentifierInputRef.current?.focus();
+      return;
+    }
+
     setLoggingIn(true);
     try {
-      const err = await sendPasswordReset(loginIdentifier);
-      if (err) {
-        setLoginFeedback(err);
+      const result = await sendPasswordReset(loginIdentifier);
+      if (!result.ok) {
+        setLoginFeedback(result.error || 'পাসওয়ার্ড রিসেট লিংক পাঠানো যায়নি।');
       } else {
-        setLoginMode('signin');
+        setResetSentTarget(result.maskedEmail || loginIdentifier.trim());
+        setResetCooldownSec(30);
       }
     } finally {
       setLoggingIn(false);
     }
   };
 
-  // Gate 2: Logged-out lock screen (Username/Email + Password AND Google Sign-In)
+  // Gate 2: Logged-out lock screen (Username/Email + Password + Forgot Password AND Google Sign-In)
   if (!user) {
     const displayedAuthError = loginFeedback || authError;
     return (
@@ -356,19 +431,27 @@ export function DashboardView() {
         <section className="bg-white border border-[#E7E2DA] rounded-2xl p-6 sm:p-9 space-y-6">
           <div className="flex flex-col items-center text-center gap-3">
             <span className="w-14 h-14 rounded-2xl bg-[#FAF8F5] border border-[#E7E2DA] flex items-center justify-center">
-              <Lock className="w-6 h-6 text-[#7A0D14]" />
+              <Lock className="w-6 h-6 text-[#7A0D14]" aria-hidden="true" />
             </span>
             <div className="space-y-1">
               <p className="text-xs font-semibold text-[#B8862B]">সংরক্ষিত প্রশাসনিক এলাকা</p>
               <h1 className="text-2xl sm:text-3xl font-bold text-[#1C1917]">
-                শিক্ষক ও প্রধান শিক্ষক লগইন
+                {loginMode === 'reset'
+                  ? 'পাসওয়ার্ড পুনরুদ্ধার'
+                  : 'অ্যাডমিন ও শিক্ষক লগইন'}
               </h1>
               <p className="text-sm text-[#57534E]">
-                ইউজারনেম (যেমন:{' '}
-                <span className="font-mono-tabular font-semibold text-[#1C1917]">
-                  {siteSettings.adminUsername || 'admin'}
-                </span>
-                ) অথবা ইমেইল ও পাসওয়ার্ড দিয়ে ড্যাশবোর্ডে প্রবেশ করুন।
+                {loginMode === 'reset' ? (
+                  'আপনার নিজস্ব অনুমোদিত ইমেইল অথবা মূল অ্যাডমিন ইউজারনেম লিখুন—ইমেইলে নিরাপদ পাসওয়ার্ড রিসেট লিংক পাঠানো হবে।'
+                ) : (
+                  <>
+                    মূল অ্যাডমিন ইউজারনেম (
+                    <span className="font-mono-tabular font-semibold text-[#1C1917]">
+                      {siteSettings.adminUsername || 'admin'}
+                    </span>
+                    ) অথবা অনুমোদিত সহকারী অ্যাডমিনের নিজস্ব ইমেইল ও পাসওয়ার্ড দিয়ে প্রবেশ করুন।
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -380,16 +463,13 @@ export function DashboardView() {
             className="grid grid-cols-3 gap-1.5 p-1 bg-[#F4F0E8] border border-[#E7E2DA] rounded-xl text-xs"
           >
             <button
+              id="tab-dash-signin"
               type="button"
               role="tab"
               aria-selected={loginMode === 'signin'}
-              onClick={() => {
-                setLoginMode('signin');
-                setLoginErrors({});
-                setLoginFeedback('');
-                clearAuthError();
-              }}
-              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+              aria-controls="panel-dash-auth"
+              onClick={() => switchLoginMode('signin')}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7A0D14] ${
                 loginMode === 'signin'
                   ? 'bg-[#7A0D14] text-white'
                   : 'text-[#44403C] hover:text-[#1C1917]'
@@ -398,16 +478,13 @@ export function DashboardView() {
               লগইন করুন
             </button>
             <button
+              id="tab-dash-setup"
               type="button"
               role="tab"
               aria-selected={loginMode === 'setup'}
-              onClick={() => {
-                setLoginMode('setup');
-                setLoginErrors({});
-                setLoginFeedback('');
-                clearAuthError();
-              }}
-              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+              aria-controls="panel-dash-auth"
+              onClick={() => switchLoginMode('setup')}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7A0D14] ${
                 loginMode === 'setup'
                   ? 'bg-[#7A0D14] text-white'
                   : 'text-[#44403C] hover:text-[#1C1917]'
@@ -416,16 +493,13 @@ export function DashboardView() {
               প্রথমবার পাসওয়ার্ড সেট
             </button>
             <button
+              id="tab-dash-reset"
               type="button"
               role="tab"
               aria-selected={loginMode === 'reset'}
-              onClick={() => {
-                setLoginMode('reset');
-                setLoginErrors({});
-                setLoginFeedback('');
-                clearAuthError();
-              }}
-              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+              aria-controls="panel-dash-auth"
+              onClick={() => switchLoginMode('reset', true)}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7A0D14] ${
                 loginMode === 'reset'
                   ? 'bg-[#7A0D14] text-white'
                   : 'text-[#44403C] hover:text-[#1C1917]'
@@ -435,143 +509,309 @@ export function DashboardView() {
             </button>
           </div>
 
-          <form onSubmit={handlePasswordLoginSubmit} noValidate className="space-y-4">
-            {loginMode !== 'setup' && (
-              <div className="space-y-1.5">
-                <label htmlFor="dash-login-id" className="block text-xs font-semibold text-[#1C1917]">
-                  ইউজারনেম অথবা ইমেইল *
-                </label>
-                <input
-                  id="dash-login-id"
-                  type="text"
-                  autoComplete="username"
-                  value={loginIdentifier}
-                  onChange={(e) => {
-                    setLoginIdentifier(e.target.value);
-                    setLoginErrors((prev) => ({ ...prev, identifier: '' }));
-                    setLoginFeedback('');
-                  }}
-                  placeholder={`যেমন: ${siteSettings.adminUsername || 'admin'} অথবা ইমেইল`}
-                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm font-mono-tabular text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
-                />
-                {loginErrors.identifier && (
-                  <p role="alert" className="text-xs text-[#B91C1C]">
-                    {loginErrors.identifier}
+          <div
+            id="panel-dash-auth"
+            role="tabpanel"
+            aria-labelledby={
+              loginMode === 'signin'
+                ? 'tab-dash-signin'
+                : loginMode === 'setup'
+                  ? 'tab-dash-setup'
+                  : 'tab-dash-reset'
+            }
+          >
+            {loginMode === 'reset' && resetSentTarget ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-2xl p-6 text-center space-y-4"
+              >
+                <span className="mx-auto w-12 h-12 rounded-xl bg-white border border-[#E7E2DA] flex items-center justify-center">
+                  <MailCheck className="w-6 h-6 text-[#15803D]" aria-hidden="true" />
+                </span>
+                <div className="space-y-1.5">
+                  <h2 className="text-base font-bold text-[#1C1917]">
+                    পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে
+                  </h2>
+                  <p className="text-xs sm:text-sm text-[#44403C] leading-relaxed">
+                    আপনার অ্যাকাউন্টের সাথে যুক্ত{' '}
+                    <span className="font-mono-tabular font-semibold text-[#1C1917]">
+                      {resetSentTarget}
+                    </span>{' '}
+                    ইমেইলে একটি নিরাপদ রিসেট লিংক পাঠানো হয়েছে। ইনবক্সে না পেলে স্প্যাম (Spam)
+                    ফোল্ডার দেখে নিন এবং লিংকে ক্লিক করে নতুন পাসওয়ার্ড সেট করুন।
                   </p>
+                </div>
+
+                {displayedAuthError && (
+                  <div
+                    role="alert"
+                    className="bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-xs font-medium rounded-xl px-4 py-3 text-left leading-relaxed"
+                  >
+                    {displayedAuthError}
+                  </div>
                 )}
-              </div>
-            )}
 
-            {loginMode === 'setup' && (
-              <div className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-3.5 text-xs text-[#44403C] space-y-1">
-                <p className="font-semibold text-[#1C1917]">
-                  প্রধান শিক্ষকের প্রথমবার পাসওয়ার্ড সেটআপ
-                </p>
-                <p>
-                  আপনার অ্যাডমিন ইউজারনেম:{' '}
-                  <span className="font-mono-tabular font-bold text-[#7A0D14]">
-                    {siteSettings.adminUsername || 'admin'}
-                  </span>
-                  । আগে Google দিয়ে লগইন করে থাকলে "পাসওয়ার্ড রিসেট" ট্যাব থেকে রিসেট লিংক নিয়ে
-                  পাসওয়ার্ড সেট করুন।
-                </p>
-              </div>
-            )}
-
-            {loginMode !== 'reset' && (
-              <div className="space-y-1.5">
-                <label htmlFor="dash-login-pass" className="block text-xs font-semibold text-[#1C1917]">
-                  {loginMode === 'setup' ? 'নতুন পাসওয়ার্ড (কমপক্ষে ৮ অক্ষর) *' : 'পাসওয়ার্ড *'}
-                </label>
-                <div className="relative">
-                  <input
-                    id="dash-login-pass"
-                    type={showLoginPassword ? 'text' : 'password'}
-                    autoComplete={loginMode === 'setup' ? 'new-password' : 'current-password'}
-                    value={loginPassword}
-                    onChange={(e) => {
-                      setLoginPassword(e.target.value);
-                      setLoginErrors((prev) => ({ ...prev, password: '' }));
-                      setLoginFeedback('');
-                    }}
-                    placeholder="আপনার পাসওয়ার্ড লিখুন"
-                    className="w-full pl-3.5 pr-10 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
-                  />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 pt-1">
                   <button
                     type="button"
-                    aria-label={showLoginPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
-                    onClick={() => setShowLoginPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#78716C] hover:text-[#1C1917] cursor-pointer"
+                    onClick={() => switchLoginMode('signin', true)}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] transition-colors cursor-pointer"
                   >
-                    {showLoginPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
+                    <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                    <span>লগইনে ফিরে যান</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loggingIn || resetCooldownSec > 0}
+                    onClick={() => {
+                      void (async () => {
+                        setLoggingIn(true);
+                        setLoginFeedback('');
+                        clearAuthError();
+                        try {
+                          const res = await sendPasswordReset(loginIdentifier);
+                          if (!res.ok) {
+                            setLoginFeedback(res.error || 'পুনরায় লিংক পাঠানো যায়নি।');
+                          } else {
+                            setResetCooldownSec(30);
+                          }
+                        } finally {
+                          setLoggingIn(false);
+                        }
+                      })();
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-white text-[#1C1917] text-xs font-semibold rounded-xl border border-[#D6CFC5] hover:border-[#7A0D14] disabled:opacity-60 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {resetCooldownSec > 0
+                        ? `আবার পাঠান (${toBengaliDigits(resetCooldownSec)} সে.)`
+                        : 'আবার লিংক পাঠান'}
+                    </span>
                   </button>
                 </div>
-                {loginErrors.password && (
-                  <p role="alert" className="text-xs text-[#B91C1C]">
-                    {loginErrors.password}
-                  </p>
-                )}
               </div>
-            )}
+            ) : (
+              <form onSubmit={handlePasswordLoginSubmit} noValidate className="space-y-4">
+                {loginMode === 'reset' && (
+                  <div
+                    id="dash-reset-help"
+                    className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-3.5 text-xs text-[#44403C] space-y-1"
+                  >
+                    <p className="font-semibold text-[#1C1917]">
+                      পাসওয়ার্ড ভুলে গেছেন? সহজেই নতুন পাসওয়ার্ড সেট করুন
+                    </p>
+                    <p className="leading-relaxed">
+                      নিচের ঘরে সহকারী অ্যাডমিনের নিজস্ব ইমেইল অথবা মূল অ্যাডমিনের ইউজারনেম (
+                      <span className="font-mono-tabular font-bold text-[#7A0D14]">
+                        {siteSettings.adminUsername || 'admin'}
+                      </span>
+                      ) লিখে বাটনে চাপ দিন—সংশ্লিষ্ট ইমেইলে একটি নিরাপদ পাসওয়ার্ড রিসেট লিংক চলে
+                      যাবে।
+                    </p>
+                  </div>
+                )}
 
-            {loginMode === 'setup' && (
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="dash-setup-confirm"
-                  className="block text-xs font-semibold text-[#1C1917]"
+                {loginMode === 'setup' && (
+                  <div
+                    id="dash-setup-help"
+                    className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-3.5 text-xs text-[#44403C] space-y-1"
+                  >
+                    <p className="font-semibold text-[#1C1917]">
+                      মূল অ্যাডমিন ও সহকারী অ্যাডমিনের প্রথমবার পাসওয়ার্ড সেটআপ
+                    </p>
+                    <p className="leading-relaxed">
+                      মূল অ্যাডমিন হলে{' '}
+                      <span className="font-mono-tabular font-bold text-[#7A0D14]">
+                        {siteSettings.adminUsername || 'admin'}
+                      </span>{' '}
+                      অথবা আপনার ইমেইল লিখুন। আর সহকারী অ্যাডমিন হলে মূল অ্যাডমিনের অনুমোদন করা{' '}
+                      <strong className="text-[#1C1917]">আপনার নিজস্ব ইমেইল</strong> লিখে নতুন
+                      পাসওয়ার্ড সেট করুন—ইমেইল ভেরিফাই করলেই ড্যাশবোর্ড খুলে যাবে।
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="dash-login-id"
+                    className="block text-xs font-semibold text-[#1C1917]"
+                  >
+                    {loginMode === 'reset'
+                      ? 'আপনার নিজস্ব ইমেইল অথবা মূল অ্যাডমিন ইউজারনেম *'
+                      : loginMode === 'setup'
+                        ? 'আপনার ইমেইল (অথবা মূল অ্যাডমিন ইউজারনেম) *'
+                        : 'ইউজারনেম অথবা নিজস্ব ইমেইল *'}
+                  </label>
+                  <input
+                    ref={loginIdentifierInputRef}
+                    id="dash-login-id"
+                    type="text"
+                    autoComplete={loginMode === 'signin' ? 'username' : 'email'}
+                    aria-invalid={Boolean(loginErrors.identifier)}
+                    aria-describedby={
+                      loginErrors.identifier
+                        ? 'dash-login-id-error'
+                        : loginMode === 'reset'
+                          ? 'dash-reset-help'
+                          : loginMode === 'setup'
+                            ? 'dash-setup-help'
+                            : undefined
+                    }
+                    value={loginIdentifier}
+                    onChange={(e) => {
+                      setLoginIdentifier(e.target.value);
+                      setLoginErrors((prev) => ({ ...prev, identifier: '' }));
+                      setLoginFeedback('');
+                    }}
+                    placeholder={`যেমন: ${siteSettings.adminUsername || 'admin'} অথবা assistant@example.com`}
+                    className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm font-mono-tabular text-[#1C1917] focus:outline-none focus:border-[#7A0D14] focus:ring-2 focus:ring-[#7A0D14]/15"
+                  />
+                  {loginErrors.identifier && (
+                    <p id="dash-login-id-error" role="alert" className="text-xs text-[#B91C1C]">
+                      {loginErrors.identifier}
+                    </p>
+                  )}
+                </div>
+
+                {loginMode !== 'reset' && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="dash-login-pass"
+                        className="block text-xs font-semibold text-[#1C1917]"
+                      >
+                        {loginMode === 'setup' ? 'নতুন পাসওয়ার্ড (কমপক্ষে ৮ অক্ষর) *' : 'পাসওয়ার্ড *'}
+                      </label>
+                      {loginMode === 'signin' && (
+                        <button
+                          type="button"
+                          onClick={() => switchLoginMode('reset', true)}
+                          className="text-xs font-semibold text-[#7A0D14] hover:text-[#5E090F] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7A0D14] rounded px-1 py-0.5 cursor-pointer"
+                        >
+                          পাসওয়ার্ড ভুলে গেছেন?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="dash-login-pass"
+                        type={showLoginPassword ? 'text' : 'password'}
+                        autoComplete={loginMode === 'setup' ? 'new-password' : 'current-password'}
+                        aria-invalid={Boolean(loginErrors.password)}
+                        aria-describedby={loginErrors.password ? 'dash-login-pass-error' : undefined}
+                        value={loginPassword}
+                        onChange={(e) => {
+                          setLoginPassword(e.target.value);
+                          setLoginErrors((prev) => ({ ...prev, password: '' }));
+                          setLoginFeedback('');
+                        }}
+                        placeholder="আপনার পাসওয়ার্ড লিখুন"
+                        className="w-full pl-3.5 pr-10 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14] focus:ring-2 focus:ring-[#7A0D14]/15"
+                      />
+                      <button
+                        type="button"
+                        aria-label={showLoginPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+                        onClick={() => setShowLoginPassword((v) => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#78716C] hover:text-[#1C1917] cursor-pointer"
+                      >
+                        {showLoginPassword ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    {loginErrors.password && (
+                      <p id="dash-login-pass-error" role="alert" className="text-xs text-[#B91C1C]">
+                        {loginErrors.password}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {loginMode === 'setup' && (
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="dash-setup-confirm"
+                      className="block text-xs font-semibold text-[#1C1917]"
+                    >
+                      পাসওয়ার্ড নিশ্চিত করুন *
+                    </label>
+                    <input
+                      id="dash-setup-confirm"
+                      type={showLoginPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      aria-invalid={Boolean(loginErrors.confirmPassword)}
+                      aria-describedby={
+                        loginErrors.confirmPassword ? 'dash-setup-confirm-error' : undefined
+                      }
+                      value={setupConfirmPassword}
+                      onChange={(e) => {
+                        setSetupConfirmPassword(e.target.value);
+                        setLoginErrors((prev) => ({ ...prev, confirmPassword: '' }));
+                      }}
+                      placeholder="পাসওয়ার্ডটি পুনরায় লিখুন"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14] focus:ring-2 focus:ring-[#7A0D14]/15"
+                    />
+                    {loginErrors.confirmPassword && (
+                      <p
+                        id="dash-setup-confirm-error"
+                        role="alert"
+                        className="text-xs text-[#B91C1C]"
+                      >
+                        {loginErrors.confirmPassword}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {displayedAuthError && (
+                  <div
+                    role="alert"
+                    className="bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-xs font-medium rounded-xl px-4 py-3 leading-relaxed"
+                  >
+                    {displayedAuthError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loggingIn}
+                  className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] disabled:opacity-60 transition-colors cursor-pointer"
                 >
-                  পাসওয়ার্ড নিশ্চিত করুন *
-                </label>
-                <input
-                  id="dash-setup-confirm"
-                  type={showLoginPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  value={setupConfirmPassword}
-                  onChange={(e) => {
-                    setSetupConfirmPassword(e.target.value);
-                    setLoginErrors((prev) => ({ ...prev, confirmPassword: '' }));
-                  }}
-                  placeholder="পাসওয়ার্ডটি পুনরায় লিখুন"
-                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
-                />
-                {loginErrors.confirmPassword && (
-                  <p role="alert" className="text-xs text-[#B91C1C]">
-                    {loginErrors.confirmPassword}
-                  </p>
+                  {loginMode === 'reset' ? (
+                    <MailCheck className="w-4 h-4" aria-hidden="true" />
+                  ) : (
+                    <KeyRound className="w-4 h-4" aria-hidden="true" />
+                  )}
+                  <span>
+                    {loggingIn
+                      ? 'প্রক্রিয়াধীন...'
+                      : loginMode === 'signin'
+                        ? 'ইমেইল / ইউজারনেম দিয়ে লগইন করুন'
+                        : loginMode === 'setup'
+                          ? 'পাসওয়ার্ড তৈরি ও ভেরিফিকেশন পাঠান'
+                          : 'পাসওয়ার্ড রিসেট লিংক পাঠান'}
+                  </span>
+                </button>
+
+                {loginMode === 'reset' && (
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => switchLoginMode('signin', true)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#57534E] hover:text-[#7A0D14] transition-colors cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>পাসওয়ার্ড মনে পড়েছে? লগইনে ফিরে যান</span>
+                    </button>
+                  </div>
                 )}
-              </div>
+              </form>
             )}
-
-            {displayedAuthError && (
-              <div
-                role="alert"
-                className="bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-xs font-medium rounded-xl px-4 py-3 leading-relaxed"
-              >
-                {displayedAuthError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loggingIn}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] disabled:opacity-60 transition-colors cursor-pointer"
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>
-                {loggingIn
-                  ? 'যাচাই করা হচ্ছে...'
-                  : loginMode === 'signin'
-                    ? 'ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করুন'
-                    : loginMode === 'setup'
-                      ? 'প্রধান শিক্ষক পাসওয়ার্ড তৈরি করুন'
-                      : 'পাসওয়ার্ড সেট / রিসেট লিংক পাঠান'}
-              </span>
-            </button>
-          </form>
+          </div>
 
           <div className="relative flex items-center justify-center">
             <span className="w-full border-t border-[#E7E2DA]" />
@@ -665,20 +905,22 @@ export function DashboardView() {
             <div className="space-y-1">
               <p className="text-xs font-semibold text-[#B91C1C]">প্রবেশাধিকার সংরক্ষিত</p>
               <h1 className="text-2xl font-bold text-[#1C1917]">
-                আপনার অ্যাকাউন্টে শিক্ষক অনুমোদন নেই
+                আপনার ইমেইলে অ্যাডমিন অনুমোদন নেই
               </h1>
             </div>
           </div>
 
           <p className="text-sm text-[#57534E] leading-relaxed">
-            আপনি <span className="font-semibold text-[#1C1917]">{user.email}</span> (শিক্ষার্থী
-            অ্যাকাউন্ট) হিসেবে লগইন আছেন। ড্যাশবোর্ড ব্যবহারের জন্য প্রধান শিক্ষকের কাছ থেকে
-            শিক্ষক অনুমোদন নিতে হবে।
+            আপনি <span className="font-semibold text-[#1C1917]">{user.email}</span> দিয়ে লগইন
+            আছেন। ড্যাশবোর্ডে প্রবেশের জন্য মূল অ্যাডমিনকে তাঁর ড্যাশবোর্ডের{' '}
+            <strong className="text-[#1C1917]">"অ্যাডমিন ব্যবস্থাপনা"</strong> ট্যাবে আপনার এই
+            ইমেইলটি যুক্ত করে অনুমোদন দিতে হবে। অনুমোদন হয়ে গেলে পেজটি রিলোড করলেই ড্যাশবোর্ড
+            খুলে যাবে।
           </p>
 
           <div className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-4 text-left space-y-2">
             <p className="text-xs font-semibold text-[#1C1917]">
-              আপনি যদি শিক্ষক হন, আপনার নিচের ইউজার আইডি (UID) প্রধান শিক্ষককে দিন:
+              বিকল্পভাবে, প্রয়োজনে নিচের ইউজার আইডি (UID) মূল অ্যাডমিনকে দিতে পারেন:
             </p>
             <div className="flex items-center justify-between gap-2 bg-white border border-[#D6CFC5] rounded-lg px-3 py-2">
               <code className="text-xs font-mono-tabular text-[#1C1917] truncate">{user.uid}</code>
@@ -721,15 +963,17 @@ export function DashboardView() {
       <div className="bg-white border border-[#E7E2DA] rounded-2xl p-5 sm:p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
           <p className="text-xs font-semibold text-[#B8862B]">
-            {isPrincipalAccess
-              ? 'প্রধান শিক্ষক প্রশাসনিক প্যানেল (পূর্ণ নিয়ন্ত্রণ)'
-              : 'শিক্ষক ব্যবস্থাপনা প্যানেল'}
+            {isRootAdmin
+              ? 'মূল অ্যাডমিন প্যানেল (পূর্ণ ও সর্বোচ্চ নিয়ন্ত্রণ)'
+              : 'সহকারী অ্যাডমিন প্যানেল (নিজস্ব ইমেইল লগইন)'}
           </p>
           <h1 className="text-2xl sm:text-3xl font-bold text-[#1C1917]">
             একাডেমিক ড্যাশবোর্ড
           </h1>
           <p className="text-sm text-[#57534E]">
-            {user.displayName || user.email} · {userRole === 'principal' ? 'প্রধান শিক্ষক' : 'শিক্ষক'} · Firebase ডাটাবেজ সংযুক্ত
+            {user.displayName || user.email} ·{' '}
+            {isRootAdmin ? 'মূল অ্যাডমিন (প্রধান শিক্ষক)' : 'সহকারী অ্যাডমিন (নিজস্ব ইমেইল লগইন)'} ·
+            Firebase ডাটাবেজ সংযুক্ত
           </p>
         </div>
 
@@ -1554,190 +1798,370 @@ export function DashboardView() {
             </div>
           )}
 
-          {activeTab === 'staff' && isPrincipalAccess && (
+          {activeTab === 'staff' && isRootAdmin && (
             <div className="space-y-6">
-              {/* Add Authorized Teacher / Principal Form */}
+              {/* Primary: Add Delegated Assistant Admin by Email */}
               <form
-                onSubmit={handleStaffSubmit}
+                onSubmit={handleInviteSubmit}
                 noValidate
                 className="bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-5"
               >
-                <div className="pb-3 border-b border-[#F0EBE3] space-y-1">
+                <div className="pb-3 border-b border-[#F0EBE3] space-y-1.5">
                   <h2 className="text-lg font-bold text-[#1C1917]">
-                    নতুন শিক্ষক অনুমোদন দিন (শুধুমাত্র প্রধান শিক্ষক)
+                    ইমেইল দিয়ে নতুন অ্যাডমিন যুক্ত করুন (শুধুমাত্র মূল অ্যাডমিন)
                   </h2>
+                  <p className="text-xs text-[#57534E] leading-relaxed">
+                    আপনি যাঁকে সহকারী অ্যাডমিন হিসেবে রাখতে চান, নিচে শুধু তাঁর{' '}
+                    <strong className="text-[#1C1917]">নিজস্ব ইমেইল</strong> যুক্ত করুন। আপনার ইমেইল
+                    স্থায়ীভাবে <strong className="text-[#7A0D14]">মূল অ্যাডমিন</strong> হিসেবে
+                    সুরক্ষিত থাকবে—সহকারী অ্যাডমিন অন্য কাউকে যুক্ত/বাদ দিতে বা মূল ইউজারনেম
+                    পরিবর্তন করতে পারবেন না।
+                  </p>
                   <p className="text-xs text-[#78716C] leading-relaxed">
-                    অন্য শিক্ষককে ড্যাশবোর্ডে প্রবেশাধিকার দিতে প্রথমে তাঁকে তাঁর Google অ্যাকাউন্ট
-                    দিয়ে ড্যাশবোর্ডে একবার লগইন করতে বলুন। সেখানে দেখানো ইউজার আইডি (UID) এখানে বসিয়ে
-                    সংরক্ষণ করলেই তিনি শিক্ষক হিসেবে ড্যাশবোর্ড ব্যবহার করতে পারবেন।
+                    ইমেইল যুক্ত করার পর সহকারী অ্যাডমিন লগইন পেজের{' '}
+                    <strong className="text-[#1C1917]">"প্রথমবার পাসওয়ার্ড সেট"</strong> ট্যাবে গিয়ে
+                    তাঁর নিজস্ব ইমেইল দিয়ে পাসওয়ার্ড তৈরি করবেন (অথবা Google দিয়ে লগইন করবেন) এবং
+                    পাসওয়ার্ড ভুলে গেলে নিজস্ব ইমেইলেই রিসেট লিংক পাবেন।
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label htmlFor="st-uid" className="block text-xs font-semibold text-[#1C1917]">
-                      শিক্ষকের ইউজার আইডি (Firebase UID) *
+                  <div className="space-y-1 sm:col-span-2">
+                    <label
+                      htmlFor="inv-email"
+                      className="block text-xs font-semibold text-[#1C1917]"
+                    >
+                      সহকারী অ্যাডমিনের নিজস্ব ইমেইল *
                     </label>
                     <input
-                      id="st-uid"
-                      type="text"
-                      value={staffForm.uid}
+                      id="inv-email"
+                      type="email"
+                      autoComplete="email"
+                      aria-invalid={Boolean(inviteErrors.email)}
+                      value={inviteForm.email}
                       onChange={(e) => {
-                        setStaffForm({ ...staffForm, uid: e.target.value });
-                        setStaffErrors((prev) => ({ ...prev, uid: '' }));
+                        setInviteForm({ ...inviteForm, email: e.target.value });
+                        setInviteErrors((prev) => ({ ...prev, email: '' }));
+                        setInviteApiError('');
                       }}
-                      placeholder="যেমন: k8x9Lm2pQ4..."
+                      placeholder="যেমন: assistant.admin@gmail.com"
                       className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm font-mono-tabular"
                     />
-                    {staffErrors.uid && (
+                    {inviteErrors.email && (
                       <p role="alert" className="text-xs text-[#B91C1C]">
-                        {staffErrors.uid}
+                        {inviteErrors.email}
                       </p>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <label htmlFor="st-name" className="block text-xs font-semibold text-[#1C1917]">
-                      শিক্ষকের পূর্ণ নাম *
+                    <label htmlFor="inv-name" className="block text-xs font-semibold text-[#1C1917]">
+                      অ্যাডমিনের পূর্ণ নাম *
                     </label>
                     <input
-                      id="st-name"
+                      id="inv-name"
                       type="text"
-                      value={staffForm.name}
+                      aria-invalid={Boolean(inviteErrors.name)}
+                      value={inviteForm.name}
                       onChange={(e) => {
-                        setStaffForm({ ...staffForm, name: e.target.value });
-                        setStaffErrors((prev) => ({ ...prev, name: '' }));
+                        setInviteForm({ ...inviteForm, name: e.target.value });
+                        setInviteErrors((prev) => ({ ...prev, name: '' }));
                       }}
-                      placeholder="যেমন: মো. তানভীর আহমেদ"
+                      placeholder="যেমন: মো. রাফিউজ্জামান"
                       className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
                     />
-                    {staffErrors.name && (
+                    {inviteErrors.name && (
                       <p role="alert" className="text-xs text-[#B91C1C]">
-                        {staffErrors.name}
+                        {inviteErrors.name}
                       </p>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <label htmlFor="st-role" className="block text-xs font-semibold text-[#1C1917]">
-                      দায়িত্ব (রোল)
-                    </label>
-                    <select
-                      id="st-role"
-                      value={staffForm.role}
-                      onChange={(e) =>
-                        setStaffForm({
-                          ...staffForm,
-                          role: e.target.value as 'teacher' | 'principal',
-                        })
-                      }
-                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
+                    <label
+                      htmlFor="inv-subject"
+                      className="block text-xs font-semibold text-[#1C1917]"
                     >
-                      <option value="teacher">শিক্ষক (ভর্তি, পেমেন্ট, রুটিন ও নোটিশ)</option>
-                      <option value="principal">প্রধান শিক্ষক (পূর্ণ প্রশাসনিক নিয়ন্ত্রণ)</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="st-subject" className="block text-xs font-semibold text-[#1C1917]">
-                      বিষয় / বিভাগ *
+                      পদবি / দায়িত্বের বিবরণ *
                     </label>
                     <input
-                      id="st-subject"
+                      id="inv-subject"
                       type="text"
-                      value={staffForm.subject}
+                      aria-invalid={Boolean(inviteErrors.subject)}
+                      value={inviteForm.subject}
                       onChange={(e) => {
-                        setStaffForm({ ...staffForm, subject: e.target.value });
-                        setStaffErrors((prev) => ({ ...prev, subject: '' }));
+                        setInviteForm({ ...inviteForm, subject: e.target.value });
+                        setInviteErrors((prev) => ({ ...prev, subject: '' }));
                       }}
-                      placeholder="যেমন: পদার্থবিজ্ঞান ও গণিত"
+                      placeholder="যেমন: অফিস ও রেজাল্ট অ্যাডমিন"
                       className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
                     />
-                    {staffErrors.subject && (
+                    {inviteErrors.subject && (
                       <p role="alert" className="text-xs text-[#B91C1C]">
-                        {staffErrors.subject}
+                        {inviteErrors.subject}
                       </p>
                     )}
                   </div>
                 </div>
+
+                {inviteApiError && (
+                  <div
+                    role="alert"
+                    className="bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-xs font-medium rounded-xl px-4 py-3"
+                  >
+                    {inviteApiError}
+                  </div>
+                )}
 
                 <div className="flex justify-end pt-1">
                   <button
                     type="submit"
-                    disabled={savingStaff}
+                    disabled={savingInvite}
                     className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#7A0D14] text-white text-sm font-semibold rounded-lg hover:bg-[#5E090F] disabled:opacity-60 transition-colors cursor-pointer"
                   >
                     <UserPlus className="w-4 h-4" />
-                    <span>{savingStaff ? 'সংরক্ষণ হচ্ছে...' : 'শিক্ষক যুক্ত করুন'}</span>
+                    <span>{savingInvite ? 'অনুমোদন সংরক্ষণ হচ্ছে...' : 'অ্যাডমিন অনুমোদন দিন'}</span>
                   </button>
                 </div>
               </form>
 
-              {/* Authorized Staff List */}
+              {/* Primary Table: Root Admin + Email-Approved Assistant Admins */}
               <section className="bg-white border border-[#E7E2DA] rounded-2xl overflow-hidden">
                 <div className="p-5 border-b border-[#E7E2DA]">
                   <h3 className="text-base font-bold text-[#1C1917]">
-                    অনুমোদিত শিক্ষক ও প্রধান শিক্ষক তালিকা ({toBengaliDigits(staffMembers.length + 1)})
+                    অনুমোদিত অ্যাডমিন তালিকা ({toBengaliDigits(staffInvites.length + 1)})
                   </h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-sm">
                     <thead>
                       <tr className="bg-[#FAF8F5] border-b border-[#E7E2DA] text-xs font-semibold text-[#57534E]">
-                        <th className="py-3 px-4">নাম ও আইডি</th>
-                        <th className="py-3 px-4">বিষয়</th>
-                        <th className="py-3 px-4">দায়িত্ব</th>
+                        <th className="py-3 px-4">নাম ও ইমেইল</th>
+                        <th className="py-3 px-4">দায়িত্বের বিবরণ</th>
+                        <th className="py-3 px-4">ভূমিকা</th>
                         <th className="py-3 px-4 text-right">ব্যবস্থা</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#F0EBE3]">
                       <tr className="bg-[#FAF8F5]/60">
                         <td className="py-3 px-4">
-                          <p className="font-semibold text-[#1C1917]">প্রধান শিক্ষক (মূল অ্যাডমিন)</p>
+                          <p className="font-semibold text-[#1C1917]">মূল অ্যাডমিন (প্রধান শিক্ষক)</p>
                           <p className="text-xs font-mono-tabular text-[#78716C]">
-                            dark24dark24dark@gmail.com
+                            {BOOTSTRAP_PRINCIPAL_EMAIL}
                           </p>
                         </td>
-                        <td className="py-3 px-4 text-[#44403C]">সকল বিভাগ ও প্রশাসন</td>
+                        <td className="py-3 px-4 text-[#44403C]">
+                          সকল বিভাগ, অ্যাডমিন অনুমোদন ও মূল ইউজারনেম
+                        </td>
                         <td className="py-3 px-4 whitespace-nowrap">
-                          <span className="text-xs font-semibold text-[#7A0D14]">প্রধান শিক্ষক</span>
+                          <span className="text-xs font-semibold text-[#7A0D14]">
+                            সুরক্ষিত (মূল অ্যাডমিন)
+                          </span>
                         </td>
                         <td className="py-3 px-4 text-right text-xs text-[#78716C] whitespace-nowrap">
-                          সুরক্ষিত
+                          স্থায়ী
                         </td>
                       </tr>
-                      {staffMembers.map((member) => (
-                        <tr key={member.uid} className="hover:bg-[#FAF8F5]">
-                          <td className="py-3 px-4">
-                            <p className="font-semibold text-[#1C1917]">{member.name}</p>
-                            <p className="text-xs font-mono-tabular text-[#78716C]">{member.uid}</p>
-                          </td>
-                          <td className="py-3 px-4 text-[#44403C]">{member.subject}</td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span
-                              className={`text-xs font-semibold ${
-                                member.role === 'principal' ? 'text-[#7A0D14]' : 'text-[#15803D]'
-                              }`}
-                            >
-                              {member.role === 'principal' ? 'প্রধান শিক্ষক' : 'শিক্ষক'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <button
-                              type="button"
-                              aria-label={`${member.name} অনুমোদন বাতিল করুন`}
-                              onClick={() => void removeStaffMember(member.uid)}
-                              className="p-2 text-[#78716C] hover:text-[#B91C1C] transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                      {staffInvites.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="py-6 px-4 text-center text-xs text-[#78716C]"
+                          >
+                            এখনো কোনো সহকারী অ্যাডমিন যুক্ত করা হয়নি। উপরের ফর্ম থেকে ইমেইল যুক্ত
+                            করুন।
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        staffInvites.map((invite) => (
+                          <tr key={invite.id} className="hover:bg-[#FAF8F5]">
+                            <td className="py-3 px-4">
+                              <p className="font-semibold text-[#1C1917]">{invite.name}</p>
+                              <p className="text-xs font-mono-tabular text-[#78716C]">
+                                {invite.email}
+                              </p>
+                            </td>
+                            <td className="py-3 px-4 text-[#44403C]">{invite.subject}</td>
+                            <td className="py-3 px-4 whitespace-nowrap">
+                              <span className="text-xs font-semibold text-[#15803D]">
+                                সহকারী অ্যাডমিন
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                aria-label={`${invite.name} অনুমোদন বাতিল করুন`}
+                                onClick={() => void removeStaffInvite(invite.id)}
+                                className="p-2 text-[#78716C] hover:text-[#B91C1C] transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
               </section>
+
+              {/* Secondary Collapsible: Legacy UID-based Staff Management */}
+              <details className="bg-white border border-[#E7E2DA] rounded-2xl overflow-hidden">
+                <summary className="px-5 py-4 text-xs font-semibold text-[#57534E] hover:text-[#1C1917] cursor-pointer select-none">
+                  উন্নত অপশন: Firebase UID দিয়ে পুরোনো পদ্ধতিতে শিক্ষক যুক্ত করুন ({toBengaliDigits(staffMembers.length)})
+                </summary>
+                <div className="p-5 pt-2 border-t border-[#F0EBE3] space-y-5">
+                  <form onSubmit={handleStaffSubmit} noValidate className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="st-uid"
+                          className="block text-xs font-semibold text-[#1C1917]"
+                        >
+                          শিক্ষকের ইউজার আইডি (Firebase UID) *
+                        </label>
+                        <input
+                          id="st-uid"
+                          type="text"
+                          value={staffForm.uid}
+                          onChange={(e) => {
+                            setStaffForm({ ...staffForm, uid: e.target.value });
+                            setStaffErrors((prev) => ({ ...prev, uid: '' }));
+                          }}
+                          placeholder="যেমন: k8x9Lm2pQ4..."
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm font-mono-tabular"
+                        />
+                        {staffErrors.uid && (
+                          <p role="alert" className="text-xs text-[#B91C1C]">
+                            {staffErrors.uid}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="st-name"
+                          className="block text-xs font-semibold text-[#1C1917]"
+                        >
+                          শিক্ষকের পূর্ণ নাম *
+                        </label>
+                        <input
+                          id="st-name"
+                          type="text"
+                          value={staffForm.name}
+                          onChange={(e) => {
+                            setStaffForm({ ...staffForm, name: e.target.value });
+                            setStaffErrors((prev) => ({ ...prev, name: '' }));
+                          }}
+                          placeholder="যেমন: মো. তানভীর আহমেদ"
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
+                        />
+                        {staffErrors.name && (
+                          <p role="alert" className="text-xs text-[#B91C1C]">
+                            {staffErrors.name}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="st-role"
+                          className="block text-xs font-semibold text-[#1C1917]"
+                        >
+                          দায়িত্ব (রোল)
+                        </label>
+                        <select
+                          id="st-role"
+                          value={staffForm.role}
+                          onChange={(e) =>
+                            setStaffForm({
+                              ...staffForm,
+                              role: e.target.value as 'teacher' | 'principal',
+                            })
+                          }
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
+                        >
+                          <option value="teacher">সহকারী অ্যাডমিন / শিক্ষক</option>
+                          <option value="principal">প্রধান শিক্ষক (সিনিয়র স্টাফ)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label
+                          htmlFor="st-subject"
+                          className="block text-xs font-semibold text-[#1C1917]"
+                        >
+                          বিষয় / বিভাগ *
+                        </label>
+                        <input
+                          id="st-subject"
+                          type="text"
+                          value={staffForm.subject}
+                          onChange={(e) => {
+                            setStaffForm({ ...staffForm, subject: e.target.value });
+                            setStaffErrors((prev) => ({ ...prev, subject: '' }));
+                          }}
+                          placeholder="যেমন: পদার্থবিজ্ঞান ও গণিত"
+                          className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm"
+                        />
+                        {staffErrors.subject && (
+                          <p role="alert" className="text-xs text-[#B91C1C]">
+                            {staffErrors.subject}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={savingStaff}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#1C1917] text-white text-xs font-semibold rounded-lg hover:bg-[#44403C] disabled:opacity-60 transition-colors cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>{savingStaff ? 'সংরক্ষণ হচ্ছে...' : 'UID দিয়ে যুক্ত করুন'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {staffMembers.length > 0 && (
+                    <div className="overflow-x-auto border border-[#E7E2DA] rounded-xl">
+                      <table className="w-full text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="bg-[#FAF8F5] border-b border-[#E7E2DA] text-xs font-semibold text-[#57534E]">
+                            <th className="py-2.5 px-4">নাম ও UID</th>
+                            <th className="py-2.5 px-4">বিষয়</th>
+                            <th className="py-2.5 px-4 text-right">ব্যবস্থা</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#F0EBE3]">
+                          {staffMembers.map((member) => (
+                            <tr key={member.uid} className="hover:bg-[#FAF8F5]">
+                              <td className="py-2.5 px-4">
+                                <p className="font-semibold text-[#1C1917]">{member.name}</p>
+                                <p className="text-xs font-mono-tabular text-[#78716C]">
+                                  {member.uid}
+                                </p>
+                              </td>
+                              <td className="py-2.5 px-4 text-[#44403C]">{member.subject}</td>
+                              <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                                <button
+                                  type="button"
+                                  aria-label={`${member.name} অনুমোদন বাতিল করুন`}
+                                  onClick={() => void removeStaffMember(member.uid)}
+                                  className="p-2 text-[#78716C] hover:text-[#B91C1C] transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </details>
             </div>
           )}
         </div>

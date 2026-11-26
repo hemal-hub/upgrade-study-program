@@ -19,6 +19,8 @@ import type {
   RoutineEntry,
   RoutineFormInput,
   SiteSettings,
+  StaffFormInput,
+  StaffInviteFormInput,
   StudentResult,
   ValidationResult,
 } from '../types';
@@ -577,4 +579,102 @@ export function validatePasswordChange(
     errors,
   };
 }
+
+export function validatePasswordResetInput(identifier: string): ValidationResult {
+  const errors: Record<string, string> = {};
+  const trimmed = identifier.trim();
+
+  if (!trimmed) {
+    errors.identifier = 'পাসওয়ার্ড রিসেট করতে আপনার নিবন্ধিত ইমেইল অথবা ইউজারনেম লিখুন।';
+  } else if (trimmed.includes('@')) {
+    if (!SIMPLE_EMAIL_REGEX.test(trimmed)) {
+      errors.identifier = 'সঠিক ইমেইল ঠিকানা লিখুন (যেমন: teacher@example.com)।';
+    }
+  } else if (!USERNAME_REGEX.test(trimmed)) {
+    errors.identifier =
+      'সঠিক ইউজারনেম (৩–৩২ অক্ষর) অথবা ইমেইল ঠিকানা লিখুন।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function maskEmailAddress(email: string): string {
+  const cleaned = email.trim();
+  const atIndex = cleaned.indexOf('@');
+  if (atIndex <= 0 || atIndex === cleaned.length - 1) return cleaned;
+
+  const local = cleaned.slice(0, atIndex);
+  const domain = cleaned.slice(atIndex + 1);
+  if (local.length <= 2) {
+    return `${local[0]}***@${domain}`;
+  }
+  return `${local.slice(0, 2)}***${local.slice(-1)}@${domain}`;
+}
+
+export function emailToInviteId(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+export function validateStaffInviteInput(
+  input: StaffInviteFormInput,
+  rootAdminEmail: string,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  const email = input.email.trim().toLowerCase();
+  const name = input.name.trim();
+  const subject = input.subject.trim();
+
+  if (!email || email.length < 5 || email.length > 120 || !SIMPLE_EMAIL_REGEX.test(email)) {
+    errors.email = 'অ্যাডমিনের সঠিক ইমেইল ঠিকানা লিখুন (সর্বোচ্চ ১২০ অক্ষর)।';
+  } else if (email === rootAdminEmail.trim().toLowerCase()) {
+    errors.email = 'এই ইমেইলটি আগে থেকেই মূল অ্যাডমিন হিসেবে সুরক্ষিত আছে।';
+  }
+
+  if (name.length < 2 || name.length > 100) {
+    errors.name = 'অ্যাডমিনের পূর্ণ নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+
+  if (subject.length < 2 || subject.length > 80) {
+    errors.subject = 'পদবি বা দায়িত্বের বিবরণ লিখুন (যেমন: অফিস অ্যাডমিন)।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function validateFirstTimeSetupInput(
+  identifier: string,
+  password: string,
+  confirmPassword: string,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  const trimmed = identifier.trim();
+  if (!trimmed) {
+    errors.identifier = 'পাসওয়ার্ড সেট করতে আপনার নিজস্ব ইমেইল অথবা মূল অ্যাডমিন ইউজারনেম লিখুন।';
+  } else {
+    const idCheck = validatePasswordResetInput(trimmed);
+    if (!idCheck.valid) {
+      errors.identifier =
+        idCheck.errors.identifier || 'সঠিক ইমেইল ঠিকানা অথবা মূল অ্যাডমিন ইউজারনেম লিখুন।';
+    }
+  }
+  if (password.length < 8) {
+    errors.password = 'নতুন পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে।';
+  }
+  if (password !== confirmPassword) {
+    errors.confirmPassword = 'পাসওয়ার্ড দুটি মেলেনি।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+
 

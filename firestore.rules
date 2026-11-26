@@ -32,11 +32,23 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.token.email == 'dark24dark24dark@gmail.com';
     }
 
+    function inviteIdForCurrentUser() {
+      return request.auth.token.email.lower().replace('[^a-z0-9]', '_');
+    }
+
+    function hasValidEmailInvite() {
+      return isVerifiedUser() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.size() <= 120 &&
+        exists(/databases/$(database)/documents/staff_invites/$(inviteIdForCurrentUser())) &&
+        get(/databases/$(database)/documents/staff_invites/$(inviteIdForCurrentUser())).data.email == request.auth.token.email.lower();
+    }
+
     function isStaff() {
       return isBootstrapPrincipal() || (
         isVerifiedUser() &&
         exists(/databases/$(database)/documents/staff/$(request.auth.uid))
-      );
+      ) || hasValidEmailInvite();
     }
 
     function isPrincipal() {
@@ -73,6 +85,17 @@ service cloud.firestore {
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
         data.role is string && data.role in ['teacher', 'principal'] &&
         data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 80 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidStaffInvite(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'subject', 'createdBy', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'name', 'role', 'subject', 'createdBy', 'createdAt']) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 120 && data.email == data.email.lower() && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$') &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.role is string && data.role in ['teacher', 'principal'] &&
+        data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 80 &&
+        isValidId(data.createdBy) &&
         data.createdAt is timestamp;
     }
 
@@ -232,28 +255,56 @@ service cloud.firestore {
           (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['displayName'])) ||
           (isPrincipal() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role']))
         );
-      allow delete: if isPrincipal() && isValidId(userId);
+      allow delete: if isBootstrapPrincipal() && isValidId(userId);
     }
 
-    // 2. Staff Role Registry
+    // 2. Staff Role Registry (UID-based legacy support; managed exclusively by Root Principal)
     match /staff/{staffId} {
       allow get: if isSignedIn() && isValidId(staffId) && (request.auth.uid == staffId || isStaff());
       allow list: if isBootstrapPrincipal();
-      allow create: if isPrincipal() &&
+      allow create: if isBootstrapPrincipal() &&
         isValidId(staffId) &&
         isValidStaffMember(incoming()) &&
         incoming().uid == staffId &&
         incoming().createdAt == request.time;
-      allow update: if isPrincipal() &&
+      allow update: if isBootstrapPrincipal() &&
         isValidId(staffId) &&
         isValidStaffMember(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'subject']);
-      allow delete: if isPrincipal() && isValidId(staffId);
+      allow delete: if isBootstrapPrincipal() && isValidId(staffId);
     }
 
-    // 3. Notices (Publicly readable; Principal/Teachers manage)
+    // 2b. Email-Based Delegated Admin Registry (Managed exclusively by Root Principal; verified invitee can only read own doc)
+    match /staff_invites/{inviteId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(inviteId) &&
+        (
+          isBootstrapPrincipal() ||
+          (request.auth.token.email is string &&
+            request.auth.token.email.size() <= 120 &&
+            inviteId == inviteIdForCurrentUser() &&
+            existing().email == request.auth.token.email.lower())
+        );
+      allow list: if isBootstrapPrincipal();
+      allow create: if isBootstrapPrincipal() &&
+        isValidId(inviteId) &&
+        isValidStaffInvite(incoming()) &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        inviteId == incoming().email.lower().replace('[^a-z0-9]', '_');
+      allow update: if isBootstrapPrincipal() &&
+        isValidId(inviteId) &&
+        isValidStaffInvite(incoming()) &&
+        incoming().email == existing().email &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'subject']);
+      allow delete: if isBootstrapPrincipal() && isValidId(inviteId);
+    }
+
+    // 3. Notices (Publicly readable; Principal/Teachers/Delegated Admins manage)
     match /notices/{noticeId} {
       allow get: if isValidId(noticeId);
       allow list: if true;
@@ -273,7 +324,7 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(noticeId) && isStaff();
     }
 
-    // 4. Routines (Publicly readable; Principal/Teachers manage)
+    // 4. Routines (Publicly readable; Principal/Teachers/Delegated Admins manage)
     match /routines/{routineId} {
       allow get: if isValidId(routineId);
       allow list: if true;
@@ -293,10 +344,10 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(routineId) && isStaff();
     }
 
-    // 5. Online Admissions (PII Isolated)
+    // 5. Online Admissions (PII Isolated; owner or verified staff can list/manage)
     match /admissions/{admissionId} {
       allow get: if isSignedIn() && isValidId(admissionId) && (existing().ownerId == request.auth.uid || isStaff());
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrapPrincipal());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isStaff());
       allow create: if isVerifiedUser() &&
         isValidId(admissionId) &&
         isValidAdmission(incoming()) &&
@@ -321,13 +372,13 @@ service cloud.firestore {
           (isStaff() &&
             incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'batchShift', 'updatedAt']))
         );
-      allow delete: if isPrincipal() && isValidId(admissionId);
+      allow delete: if isBootstrapPrincipal() && isValidId(admissionId);
     }
 
     // 6. Payments (PII Isolated, Atomic Relational Integrity with Admission)
     match /payments/{paymentId} {
       allow get: if isSignedIn() && isValidId(paymentId) && (existing().ownerId == request.auth.uid || isStaff());
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrapPrincipal());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isStaff());
       allow create: if isVerifiedUser() &&
         isValidId(paymentId) &&
         isValidPayment(incoming()) &&
@@ -348,10 +399,10 @@ service cloud.firestore {
           isStaff() &&
           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
         );
-      allow delete: if isPrincipal() && isValidId(paymentId);
+      allow delete: if isBootstrapPrincipal() && isValidId(paymentId);
     }
 
-    // 7. Site Settings CMS (Publicly readable; Staff/Principal manage, only Principal changes adminUsername)
+    // 7. Site Settings CMS (Publicly readable; Staff/Admins manage CMS, ONLY Root Principal changes adminUsername)
     match /site_settings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if true;
@@ -360,7 +411,7 @@ service cloud.firestore {
         isValidSiteSettings(incoming()) &&
         incoming().updatedBy == request.auth.uid &&
         incoming().updatedAt == request.time &&
-        ((!('adminUsername' in incoming()) && isStaff()) || isPrincipal());
+        ((!('adminUsername' in incoming()) && isStaff()) || isBootstrapPrincipal());
       allow update: if isVerifiedUser() &&
         isValidId(settingId) &&
         isValidSiteSettings(incoming()) &&
@@ -368,12 +419,12 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         (
           (isStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'updatedBy', 'updatedAt'])) ||
-          (isPrincipal() && incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'adminUsername', 'updatedBy', 'updatedAt']))
+          (isBootstrapPrincipal() && incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'adminUsername', 'updatedBy', 'updatedAt']))
         );
-      allow delete: if isPrincipal() && isValidId(settingId);
+      allow delete: if isBootstrapPrincipal() && isValidId(settingId);
     }
 
-    // 8. Exam Results (Publicly readable; Staff/Principal publish and manage)
+    // 8. Exam Results (Publicly readable; Staff/Admins publish and manage)
     match /results/{resultId} {
       allow get: if isValidId(resultId);
       allow list: if true;

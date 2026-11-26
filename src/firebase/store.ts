@@ -30,12 +30,14 @@ import type {
   ProofItem,
   RoutineEntry,
   SiteSettings,
+  StaffInvite,
+  StaffInviteFormInput,
   StudentResult,
   TransactionStatus,
   UserRole,
 } from '../types';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
-import { sanitizeText } from '../utils/academicLogic';
+import { emailToInviteId, sanitizeText } from '../utils/academicLogic';
 import { createStudentAvatarSvg } from '../utils/imageUtils';
 
 function formatTimestamp(val: unknown): string {
@@ -88,6 +90,22 @@ export async function ensureUserProfile(user: User): Promise<UserRole> {
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `staff/${user.uid}`);
+  }
+
+  // Check email-based delegated admin authorization (verified email must strictly match)
+  if (user.emailVerified && user.email && user.email.length <= 120) {
+    const inviteId = emailToInviteId(user.email);
+    try {
+      const inviteSnap = await getDoc(doc(db, 'staff_invites', inviteId));
+      if (inviteSnap.exists()) {
+        const inviteData = inviteSnap.data();
+        if (String(inviteData.email ?? '').toLowerCase() === user.email.toLowerCase()) {
+          return inviteData.role === 'principal' ? 'principal' : 'teacher';
+        }
+      }
+    } catch {
+      // Non-invited user will receive permission-denied on staff_invites — safely stays 'student'
+    }
   }
 
   return 'student';
@@ -727,3 +745,67 @@ export async function removeStaffMemberInFirestore(uid: string): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+export function subscribeStaffInvites(
+  onData: (invites: StaffInvite[]) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = 'staff_invites';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items: StaffInvite[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          email: String(data.email ?? '').toLowerCase(),
+          name: String(data.name ?? ''),
+          role: (data.role === 'principal' ? 'principal' : 'teacher') as 'teacher' | 'principal',
+          subject: String(data.subject ?? ''),
+          createdBy: String(data.createdBy ?? ''),
+          createdAt: formatTimestamp(data.createdAt),
+        };
+      });
+      onData(items);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export async function addStaffInviteInFirestore(
+  invite: StaffInviteFormInput,
+  createdByUid: string,
+): Promise<string> {
+  const normalizedEmail = invite.email.trim().toLowerCase().slice(0, 120);
+  const inviteId = emailToInviteId(normalizedEmail);
+  const path = `staff_invites/${inviteId}`;
+  try {
+    await setDoc(doc(db, 'staff_invites', inviteId), {
+      email: normalizedEmail,
+      name: sanitizeText(invite.name, 100),
+      role: invite.role,
+      subject: sanitizeText(invite.subject, 80),
+      createdBy: createdByUid,
+      createdAt: serverTimestamp(),
+    });
+    return inviteId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function removeStaffInviteInFirestore(inviteId: string): Promise<void> {
+  const path = `staff_invites/${inviteId}`;
+  try {
+    await deleteDoc(doc(db, 'staff_invites', inviteId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+

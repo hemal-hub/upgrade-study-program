@@ -64,6 +64,44 @@
       },
       "required": ["uid", "name", "role", "subject", "createdAt"]
     },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Email-based delegated admin authorization created exclusively by the Root Principal.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "enum": ["teacher", "principal"]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "name", "role", "subject", "createdBy", "createdAt"]
+    },
     "Notice": {
       "title": "Notice",
       "description": "Official coaching notice published by the Principal or Teachers.",
@@ -469,6 +507,10 @@
     "/staff/{staffId}": {
       "schema": { "$ref": "#/entities/StaffMember" },
       "description": "Authorized teachers and principal access control records."
+    },
+    "/staff_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Email-based delegated admin authorizations managed exclusively by the Root Principal."
     },
     "/notices/{noticeId}": {
       "schema": { "$ref": "#/entities/Notice" },
