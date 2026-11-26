@@ -6,12 +6,17 @@ import {
   Check,
   Copy,
   CreditCard,
+  Eye,
+  EyeOff,
   GraduationCap,
+  KeyRound,
   LayoutDashboard,
   Lock,
   LogIn,
   LogOut,
+  MailCheck,
   Plus,
+  RefreshCw,
   Search,
   ShieldAlert,
   Sliders,
@@ -21,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { AdminAccountSecurityTab } from './admin/AdminAccountSecurityTab';
 import { AdminCmsTab } from './admin/AdminCmsTab';
 import { AdminResultsTab } from './admin/AdminResultsTab';
 import { AdminStudentListTab } from './admin/AdminStudentListTab';
@@ -46,6 +52,7 @@ import {
   getAllowedGroupsForClass,
   NOTICE_CATEGORIES,
   toBengaliDigits,
+  validateLoginCredentials,
   validateNoticeInput,
   validateRoutineInput,
   validateStaffInput,
@@ -60,6 +67,7 @@ type DashboardTab =
   | 'routines'
   | 'notices'
   | 'cms'
+  | 'security'
   | 'staff';
 
 const BASE_SIDEBAR_ITEMS: Array<{ id: DashboardTab; label: string; icon: typeof LayoutDashboard }> = [
@@ -71,6 +79,7 @@ const BASE_SIDEBAR_ITEMS: Array<{ id: DashboardTab; label: string; icon: typeof 
   { id: 'routines', label: 'রুটিন প্রকাশ', icon: Calendar },
   { id: 'notices', label: 'নোটিশ প্রকাশ', icon: Bell },
   { id: 'cms', label: 'ওয়েবসাইট কনটেন্ট (CMS)', icon: Sliders },
+  { id: 'security', label: 'লগইন ও পাসওয়ার্ড', icon: KeyRound },
 ];
 
 export function DashboardView() {
@@ -80,7 +89,15 @@ export function DashboardView() {
     userRole,
     hasStaffAccess,
     isPrincipalAccess,
+    authError,
+    clearAuthError,
+    siteSettings,
     signInWithGoogle,
+    signInWithUsernameOrEmail,
+    setupPrincipalPasswordAccount,
+    sendPasswordReset,
+    resendVerificationEmail,
+    refreshAuthUser,
     signOutUser,
     setActiveView,
     admissions,
@@ -137,6 +154,16 @@ export function DashboardView() {
   const [staffErrors, setStaffErrors] = useState<Record<string, string>>({});
   const [savingStaff, setSavingStaff] = useState(false);
   const [copiedUid, setCopiedUid] = useState(false);
+
+  // Dashboard login form state (Username/Email + Password + Setup/Reset)
+  const [loginMode, setLoginMode] = useState<'signin' | 'setup' | 'reset'>('signin');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginErrors, setLoginErrors] = useState<Record<string, string>>({});
+  const [loginFeedback, setLoginFeedback] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
 
   const sidebarItems = useMemo(
     () =>
@@ -258,53 +285,369 @@ export function DashboardView() {
     );
   }
 
-  // Gate 2: Logged-out lock screen (zero student data or controls exposed)
+  const handlePasswordLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearAuthError();
+    setLoginFeedback('');
+
+    if (loginMode === 'signin') {
+      const validation = validateLoginCredentials(loginIdentifier, loginPassword);
+      setLoginErrors(validation.errors);
+      if (!validation.valid) return;
+
+      setLoggingIn(true);
+      try {
+        const err = await signInWithUsernameOrEmail(loginIdentifier, loginPassword);
+        if (err) {
+          setLoginFeedback(err);
+        } else {
+          setLoginPassword('');
+        }
+      } finally {
+        setLoggingIn(false);
+      }
+      return;
+    }
+
+    if (loginMode === 'setup') {
+      const nextErrs: Record<string, string> = {};
+      if (loginPassword.length < 8) {
+        nextErrs.password = 'নতুন পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে।';
+      }
+      if (loginPassword !== setupConfirmPassword) {
+        nextErrs.confirmPassword = 'পাসওয়ার্ড দুটি মেলেনি।';
+      }
+      setLoginErrors(nextErrs);
+      if (Object.keys(nextErrs).length > 0) return;
+
+      setLoggingIn(true);
+      try {
+        const err = await setupPrincipalPasswordAccount(loginPassword);
+        if (err) {
+          setLoginFeedback(err);
+        } else {
+          setLoginPassword('');
+          setSetupConfirmPassword('');
+        }
+      } finally {
+        setLoggingIn(false);
+      }
+      return;
+    }
+
+    setLoggingIn(true);
+    try {
+      const err = await sendPasswordReset(loginIdentifier);
+      if (err) {
+        setLoginFeedback(err);
+      } else {
+        setLoginMode('signin');
+      }
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  // Gate 2: Logged-out lock screen (Username/Email + Password AND Google Sign-In)
   if (!user) {
+    const displayedAuthError = loginFeedback || authError;
     return (
-      <div className="max-w-xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
-        <section className="bg-white border border-[#E7E2DA] rounded-2xl p-8 sm:p-10 text-center space-y-6">
-          <div className="flex flex-col items-center gap-3">
-            <span className="w-16 h-16 rounded-2xl bg-[#FAF8F5] border border-[#E7E2DA] flex items-center justify-center">
-              <Lock className="w-7 h-7 text-[#7A0D14]" />
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
+        <section className="bg-white border border-[#E7E2DA] rounded-2xl p-6 sm:p-9 space-y-6">
+          <div className="flex flex-col items-center text-center gap-3">
+            <span className="w-14 h-14 rounded-2xl bg-[#FAF8F5] border border-[#E7E2DA] flex items-center justify-center">
+              <Lock className="w-6 h-6 text-[#7A0D14]" />
             </span>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <p className="text-xs font-semibold text-[#B8862B]">সংরক্ষিত প্রশাসনিক এলাকা</p>
               <h1 className="text-2xl sm:text-3xl font-bold text-[#1C1917]">
                 শিক্ষক ও প্রধান শিক্ষক লগইন
               </h1>
+              <p className="text-sm text-[#57534E]">
+                ইউজারনেম (যেমন:{' '}
+                <span className="font-mono-tabular font-semibold text-[#1C1917]">
+                  {siteSettings.adminUsername || 'admin'}
+                </span>
+                ) অথবা ইমেইল ও পাসওয়ার্ড দিয়ে ড্যাশবোর্ডে প্রবেশ করুন।
+              </p>
             </div>
           </div>
 
-          <p className="text-sm sm:text-[15px] text-[#57534E] leading-relaxed">
-            শিক্ষার্থীদের ব্যক্তিগত তথ্য দেখা, অনলাইন ভর্তি অনুমোদন, পেমেন্ট যাচাই এবং নতুন ক্লাস
-            রুটিন বা নোটিশ প্রকাশের জন্য অনুমোদিত প্রধান শিক্ষক অথবা শিক্ষক অ্যাকাউন্ট দিয়ে লগইন
-            করতে হবে।
-          </p>
-
-          <div className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-4 text-left text-xs text-[#57534E] space-y-1.5">
-            <p className="font-semibold text-[#1C1917]">লগইন করলে যে সুবিধাগুলো আনলক হবে:</p>
-            <p>• Student List (শ্রেণিভিত্তিক ছবিসহ পূর্ণাঙ্গ তথ্য), ভর্তি অনুমোদন ও পেমেন্ট লেজার</p>
-            <p>• শ্রেণিভিত্তিক পরীক্ষার রেজাল্ট, ক্লাস রুটিন ও নোটিশ প্রকাশ</p>
-            <p>• ওয়েবসাইটের লোগো, ব্যানার, লেখা পরিবর্তন, নতুন সেকশন যুক্ত ও হাইড করার সুবিধা</p>
+          {/* Login Mode Tabs */}
+          <div
+            role="tablist"
+            aria-label="লগইন পদ্ধতি"
+            className="grid grid-cols-3 gap-1.5 p-1 bg-[#F4F0E8] border border-[#E7E2DA] rounded-xl text-xs"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={loginMode === 'signin'}
+              onClick={() => {
+                setLoginMode('signin');
+                setLoginErrors({});
+                setLoginFeedback('');
+                clearAuthError();
+              }}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+                loginMode === 'signin'
+                  ? 'bg-[#7A0D14] text-white'
+                  : 'text-[#44403C] hover:text-[#1C1917]'
+              }`}
+            >
+              লগইন করুন
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={loginMode === 'setup'}
+              onClick={() => {
+                setLoginMode('setup');
+                setLoginErrors({});
+                setLoginFeedback('');
+                clearAuthError();
+              }}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+                loginMode === 'setup'
+                  ? 'bg-[#7A0D14] text-white'
+                  : 'text-[#44403C] hover:text-[#1C1917]'
+              }`}
+            >
+              প্রথমবার পাসওয়ার্ড সেট
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={loginMode === 'reset'}
+              onClick={() => {
+                setLoginMode('reset');
+                setLoginErrors({});
+                setLoginFeedback('');
+                clearAuthError();
+              }}
+              className={`py-2 px-2 font-semibold rounded-lg transition-colors cursor-pointer ${
+                loginMode === 'reset'
+                  ? 'bg-[#7A0D14] text-white'
+                  : 'text-[#44403C] hover:text-[#1C1917]'
+              }`}
+            >
+              পাসওয়ার্ড রিসেট
+            </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2">
+          <form onSubmit={handlePasswordLoginSubmit} noValidate className="space-y-4">
+            {loginMode !== 'setup' && (
+              <div className="space-y-1.5">
+                <label htmlFor="dash-login-id" className="block text-xs font-semibold text-[#1C1917]">
+                  ইউজারনেম অথবা ইমেইল *
+                </label>
+                <input
+                  id="dash-login-id"
+                  type="text"
+                  autoComplete="username"
+                  value={loginIdentifier}
+                  onChange={(e) => {
+                    setLoginIdentifier(e.target.value);
+                    setLoginErrors((prev) => ({ ...prev, identifier: '' }));
+                    setLoginFeedback('');
+                  }}
+                  placeholder={`যেমন: ${siteSettings.adminUsername || 'admin'} অথবা ইমেইল`}
+                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm font-mono-tabular text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                />
+                {loginErrors.identifier && (
+                  <p role="alert" className="text-xs text-[#B91C1C]">
+                    {loginErrors.identifier}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {loginMode === 'setup' && (
+              <div className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-3.5 text-xs text-[#44403C] space-y-1">
+                <p className="font-semibold text-[#1C1917]">
+                  প্রধান শিক্ষকের প্রথমবার পাসওয়ার্ড সেটআপ
+                </p>
+                <p>
+                  আপনার অ্যাডমিন ইউজারনেম:{' '}
+                  <span className="font-mono-tabular font-bold text-[#7A0D14]">
+                    {siteSettings.adminUsername || 'admin'}
+                  </span>
+                  । আগে Google দিয়ে লগইন করে থাকলে "পাসওয়ার্ড রিসেট" ট্যাব থেকে রিসেট লিংক নিয়ে
+                  পাসওয়ার্ড সেট করুন।
+                </p>
+              </div>
+            )}
+
+            {loginMode !== 'reset' && (
+              <div className="space-y-1.5">
+                <label htmlFor="dash-login-pass" className="block text-xs font-semibold text-[#1C1917]">
+                  {loginMode === 'setup' ? 'নতুন পাসওয়ার্ড (কমপক্ষে ৮ অক্ষর) *' : 'পাসওয়ার্ড *'}
+                </label>
+                <div className="relative">
+                  <input
+                    id="dash-login-pass"
+                    type={showLoginPassword ? 'text' : 'password'}
+                    autoComplete={loginMode === 'setup' ? 'new-password' : 'current-password'}
+                    value={loginPassword}
+                    onChange={(e) => {
+                      setLoginPassword(e.target.value);
+                      setLoginErrors((prev) => ({ ...prev, password: '' }));
+                      setLoginFeedback('');
+                    }}
+                    placeholder="আপনার পাসওয়ার্ড লিখুন"
+                    className="w-full pl-3.5 pr-10 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showLoginPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+                    onClick={() => setShowLoginPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#78716C] hover:text-[#1C1917] cursor-pointer"
+                  >
+                    {showLoginPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                {loginErrors.password && (
+                  <p role="alert" className="text-xs text-[#B91C1C]">
+                    {loginErrors.password}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {loginMode === 'setup' && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="dash-setup-confirm"
+                  className="block text-xs font-semibold text-[#1C1917]"
+                >
+                  পাসওয়ার্ড নিশ্চিত করুন *
+                </label>
+                <input
+                  id="dash-setup-confirm"
+                  type={showLoginPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={setupConfirmPassword}
+                  onChange={(e) => {
+                    setSetupConfirmPassword(e.target.value);
+                    setLoginErrors((prev) => ({ ...prev, confirmPassword: '' }));
+                  }}
+                  placeholder="পাসওয়ার্ডটি পুনরায় লিখুন"
+                  className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-xl text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                />
+                {loginErrors.confirmPassword && (
+                  <p role="alert" className="text-xs text-[#B91C1C]">
+                    {loginErrors.confirmPassword}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {displayedAuthError && (
+              <div
+                role="alert"
+                className="bg-[#FEF2F2] border border-[#FECACA] text-[#B91C1C] text-xs font-medium rounded-xl px-4 py-3 leading-relaxed"
+              >
+                {displayedAuthError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loggingIn}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] disabled:opacity-60 transition-colors cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>
+                {loggingIn
+                  ? 'যাচাই করা হচ্ছে...'
+                  : loginMode === 'signin'
+                    ? 'ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করুন'
+                    : loginMode === 'setup'
+                      ? 'প্রধান শিক্ষক পাসওয়ার্ড তৈরি করুন'
+                      : 'পাসওয়ার্ড সেট / রিসেট লিংক পাঠান'}
+              </span>
+            </button>
+          </form>
+
+          <div className="relative flex items-center justify-center">
+            <span className="w-full border-t border-[#E7E2DA]" />
+            <span className="bg-white px-3 text-xs text-[#78716C] absolute">অথবা</span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
             <button
               type="button"
               onClick={() => void signInWithGoogle()}
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] transition-colors cursor-pointer"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#FAF8F5] text-[#1C1917] text-sm font-semibold rounded-xl border border-[#D6CFC5] hover:border-[#7A0D14] transition-colors cursor-pointer"
             >
-              <LogIn className="w-4 h-4" />
+              <LogIn className="w-4 h-4 text-[#7A0D14]" />
               <span>Google দিয়ে লগইন করুন</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveView('admission')}
-              className="px-5 py-3 bg-[#FAF8F5] text-[#1C1917] text-sm font-semibold rounded-xl border border-[#D6CFC5] hover:border-[#7A0D14] transition-colors cursor-pointer"
+              className="px-5 py-2.5 text-sm font-semibold text-[#57534E] hover:text-[#7A0D14] transition-colors cursor-pointer"
             >
               শিক্ষার্থী পোর্টালে যান
             </button>
           </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Gate 2.5: Email/Password account created but email verification link not clicked yet
+  if (!user.emailVerified) {
+    return (
+      <div className="max-w-xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
+        <section className="bg-white border border-[#E7E2DA] rounded-2xl p-8 sm:p-10 text-center space-y-6">
+          <div className="flex flex-col items-center gap-3">
+            <span className="w-16 h-16 rounded-2xl bg-[#FAF8F5] border border-[#E7E2DA] flex items-center justify-center">
+              <MailCheck className="w-7 h-7 text-[#B8862B]" />
+            </span>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-[#B8862B]">ইমেইল যাচাইকরণ আবশ্যক</p>
+              <h1 className="text-2xl font-bold text-[#1C1917]">
+                আপনার ইমেইলটি ভেরিফাই করুন
+              </h1>
+            </div>
+          </div>
+
+          <p className="text-sm text-[#57534E] leading-relaxed">
+            নিরাপত্তার স্বার্থে <span className="font-semibold text-[#1C1917]">{user.email}</span>{' '}
+            ইমেইলে একটি ভেরিফিকেশন লিংক পাঠানো হয়েছে। লিংকটিতে ক্লিক করার পর নিচের "ভেরিফাই
+            করেছি" বাটনে চাপলেই আপনার অ্যাডমিন ড্যাশবোর্ড খুলে যাবে।
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void refreshAuthUser()}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>ভেরিফাই করেছি — ড্যাশবোর্ডে প্রবেশ করুন</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void resendVerificationEmail()}
+              className="px-5 py-2.5 bg-[#FAF8F5] text-[#1C1917] text-sm font-semibold rounded-xl border border-[#D6CFC5] hover:border-[#7A0D14] transition-colors cursor-pointer"
+            >
+              লিংক আবার পাঠান
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void signOutUser()}
+            className="text-xs font-semibold text-[#78716C] hover:text-[#7A0D14] cursor-pointer"
+          >
+            লগআউট করুন
+          </button>
         </section>
       </div>
     );
@@ -556,6 +899,8 @@ export function DashboardView() {
           {activeTab === 'results' && <AdminResultsTab />}
 
           {activeTab === 'cms' && <AdminCmsTab />}
+
+          {activeTab === 'security' && <AdminAccountSecurityTab />}
 
           {activeTab === 'students' && (
             <section className="bg-white border border-[#E7E2DA] rounded-2xl overflow-hidden">

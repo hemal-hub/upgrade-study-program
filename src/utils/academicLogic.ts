@@ -498,3 +498,83 @@ export function validateStaffInput(input: {
     errors,
   };
 }
+
+export const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,32}$/;
+export const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function resolveLoginEmail(
+  identifier: string,
+  adminUsername: string,
+  principalEmail: string,
+): string | null {
+  const cleaned = identifier.trim();
+  if (!cleaned) return null;
+
+  if (cleaned.includes('@')) {
+    return SIMPLE_EMAIL_REGEX.test(cleaned) ? cleaned.toLowerCase() : null;
+  }
+
+  const normalizedAdmin = (adminUsername || 'admin').trim().toLowerCase();
+  if (cleaned.toLowerCase() === normalizedAdmin) {
+    return principalEmail.toLowerCase();
+  }
+
+  return null;
+}
+
+export function validateLoginCredentials(identifier: string, password: string): ValidationResult {
+  const errors: Record<string, string> = {};
+  const trimmedId = identifier.trim();
+
+  if (trimmedId.length < 3) {
+    errors.identifier = 'সঠিক ইউজারনেম অথবা ইমেইল লিখুন।';
+  }
+  if (password.length < 6) {
+    errors.password = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function validateUsernameChange(newUsername: string): ValidationResult {
+  const errors: Record<string, string> = {};
+  const trimmed = newUsername.trim();
+
+  if (!USERNAME_REGEX.test(trimmed)) {
+    errors.username =
+      'ইউজারনেম ৩ থেকে ৩২ অক্ষরের হতে হবে (শুধুমাত্র ইংরেজি অক্ষর, সংখ্যা, _ অথবা - ব্যবহার করুন)।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function validatePasswordChange(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string,
+  requireCurrent: boolean,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+
+  if (requireCurrent && currentPassword.length < 6) {
+    errors.currentPassword = 'আপনার বর্তমান পাসওয়ার্ড লিখুন।';
+  }
+  if (newPassword.length < 8) {
+    errors.newPassword = 'নতুন পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে।';
+  }
+  if (newPassword !== confirmPassword) {
+    errors.confirmPassword = 'নতুন পাসওয়ার্ড এবং নিশ্চিতকরণ পাসওয়ার্ড মেলেনি।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+

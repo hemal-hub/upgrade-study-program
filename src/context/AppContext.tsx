@@ -1,5 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  linkWithCredential,
+  onAuthStateChanged,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updatePassword,
+  type User,
+} from 'firebase/auth';
 import {
   auth,
   BOOTSTRAP_PRINCIPAL_EMAIL,
@@ -62,9 +76,45 @@ import {
   canAccessDashboard,
   canManageStaff,
   generateRollNumber,
+  resolveLoginEmail,
   sanitizeText,
   toBengaliDigits,
+  validateUsernameChange,
 } from '../utils/academicLogic';
+
+function formatFirebaseAuthError(error: unknown): string {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+    return 'ইউজারনেম/ইমেইল অথবা পাসওয়ার্ড সঠিক নয়।';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Firebase Console → Authentication → Sign-in method থেকে "Email/Password" চালু করা নেই। অনুগ্রহ করে সেটি Enable করুন।';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'এই ডোমেইনটি';
+    return `Firebase Console → Authentication → Settings → Authorized domains-এ "${host}" ডোমেইনটি যুক্ত করা নেই।`;
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'ব্রাউজার Google লগইন পপআপ ব্লক করেছে। পপআপ অনুমতি দিন অথবা ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করুন।';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'এই ইমেইলে আগে থেকেই অ্যাকাউন্ট আছে। নিচের "পাসওয়ার্ড রিসেট / সেট লিংক পাঠান" বাটন ব্যবহার করে পাসওয়ার্ড সেট করুন।';
+  }
+  if (code === 'auth/weak-password') {
+    return 'পাসওয়ার্ডটি খুবই দুর্বল। কমপক্ষে ৮ অক্ষরের শক্তিশালী পাসওয়ার্ড দিন।';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'অতিরিক্ত চেষ্টার কারণে সাময়িকভাবে লগইন স্থগিত আছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+  }
+  if (code === 'auth/requires-recent-login') {
+    return 'নিরাপত্তার জন্য অনুগ্রহ করে একবার লগআউট করে পুনরায় লগইন করুন এবং আবার চেষ্টা করুন।';
+  }
+  return 'লগইন বা অ্যাকাউন্ট আপডেট সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+}
 
 interface ToastMessage {
   id: number;
@@ -83,8 +133,18 @@ interface AppContextValue {
   userRole: UserRole;
   hasStaffAccess: boolean;
   isPrincipalAccess: boolean;
+  hasPasswordProvider: boolean;
   isCloudSynced: boolean;
+  authError: string | null;
+  clearAuthError: () => void;
   signInWithGoogle: () => Promise<void>;
+  signInWithUsernameOrEmail: (identifier: string, password: string) => Promise<string | null>;
+  setupPrincipalPasswordAccount: (password: string) => Promise<string | null>;
+  sendPasswordReset: (identifier: string) => Promise<string | null>;
+  resendVerificationEmail: () => Promise<void>;
+  refreshAuthUser: () => Promise<void>;
+  changeAccountPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
+  updateAdminUsername: (newUsername: string) => Promise<string | null>;
   signOutUser: () => Promise<void>;
   siteSettings: SiteSettings;
   updateSiteSettings: (nextSettings: SiteSettings) => Promise<void>;
@@ -168,6 +228,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [localPayments, setLocalPayments] = useState<PaymentRecord[]>(SEED_PAYMENTS);
 
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [, setProviderRefreshTick] = useState(0);
+
+  const clearAuthError = useCallback(() => setAuthError(null), []);
 
   const showToast = useCallback((text: string, tone: 'success' | 'info' | 'error' = 'success') => {
     setToast({ id: Date.now(), text, tone });
@@ -305,6 +369,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [localPayments, cloudPayments]);
 
   const isCloudSynced = Boolean(user);
+  const hasPasswordProvider = Boolean(
+    user?.providerData?.some((provider) => provider.providerId === 'password'),
+  );
   const hasStaffAccess = canAccessDashboard(
     Boolean(user),
     Boolean(user?.emailVerified),
@@ -317,20 +384,214 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signInWithGoogle = useCallback(async () => {
+    setAuthError(null);
     try {
       await signInWithPopup(auth, googleProvider);
       showToast('Google অ্যাকাউন্টের মাধ্যমে সফলভাবে লগইন হয়েছে এবং ক্লাউড ডাটাবেজ যুক্ত হয়েছে।', 'success');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'লগইন ব্যর্থ হয়েছে।';
-      if (!message.includes('popup-closed-by-user')) {
-        showToast('Google লগইন সম্পন্ন করা যায়নি। পুনরায় চেষ্টা করুন।', 'error');
-      }
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code ?? '')
+          : '';
+      if (code === 'auth/popup-closed-by-user') return;
+      const msg = formatFirebaseAuthError(error);
+      setAuthError(msg);
+      showToast(msg, 'error');
     }
   }, [showToast]);
+
+  const signInWithUsernameOrEmail = useCallback(
+    async (identifier: string, password: string): Promise<string | null> => {
+      setAuthError(null);
+      const resolvedEmail = resolveLoginEmail(
+        identifier,
+        siteSettings.adminUsername,
+        BOOTSTRAP_PRINCIPAL_EMAIL,
+      );
+      if (!resolvedEmail) {
+        const msg = 'ইউজারনেম বা ইমেইল সঠিক নয়। অনুগ্রহ করে সঠিক ইউজারনেম অথবা ইমেইল দিন।';
+        setAuthError(msg);
+        return msg;
+      }
+
+      try {
+        await signInWithEmailAndPassword(auth, resolvedEmail, password);
+        showToast('ইউজারনেম ও পাসওয়ার্ড দিয়ে সফলভাবে ড্যাশবোর্ডে লগইন হয়েছে।', 'success');
+        return null;
+      } catch (error) {
+        const msg = formatFirebaseAuthError(error);
+        setAuthError(msg);
+        return msg;
+      }
+    },
+    [showToast, siteSettings.adminUsername],
+  );
+
+  const setupPrincipalPasswordAccount = useCallback(
+    async (password: string): Promise<string | null> => {
+      setAuthError(null);
+      try {
+        const cred = await createUserWithEmailAndPassword(
+          auth,
+          BOOTSTRAP_PRINCIPAL_EMAIL,
+          password,
+        );
+        try {
+          await sendEmailVerification(cred.user);
+        } catch {
+          // Non-fatal if verification email rate-limited
+        }
+        showToast(
+          `অ্যাডমিন পাসওয়ার্ড তৈরি হয়েছে। ${BOOTSTRAP_PRINCIPAL_EMAIL} ইমেইলে পাঠানো ভেরিফিকেশন লিংকে ক্লিক করুন।`,
+          'success',
+        );
+        return null;
+      } catch (error) {
+        const msg = formatFirebaseAuthError(error);
+        setAuthError(msg);
+        return msg;
+      }
+    },
+    [showToast],
+  );
+
+  const sendPasswordReset = useCallback(
+    async (identifier: string): Promise<string | null> => {
+      setAuthError(null);
+      const target = identifier.trim() || siteSettings.adminUsername || 'admin';
+      const resolvedEmail = resolveLoginEmail(
+        target,
+        siteSettings.adminUsername,
+        BOOTSTRAP_PRINCIPAL_EMAIL,
+      );
+      if (!resolvedEmail) {
+        const msg = 'সঠিক ইউজারনেম বা ইমেইল দিন যেন পাসওয়ার্ড সেট/রিসেট লিংক পাঠানো যায়।';
+        setAuthError(msg);
+        return msg;
+      }
+
+      try {
+        await sendPasswordResetEmail(auth, resolvedEmail);
+        showToast(
+          `${resolvedEmail} ইমেইলে পাসওয়ার্ড সেট/রিসেট লিংক পাঠানো হয়েছে। ইনবক্স বা স্প্যাম ফোল্ডার চেক করুন।`,
+          'success',
+        );
+        return null;
+      } catch (error) {
+        const msg = formatFirebaseAuthError(error);
+        setAuthError(msg);
+        return msg;
+      }
+    },
+    [showToast, siteSettings.adminUsername],
+  );
+
+  const resendVerificationEmail = useCallback(async () => {
+    if (!auth.currentUser) return;
+    try {
+      await sendEmailVerification(auth.currentUser);
+      showToast(`${auth.currentUser.email} ইমেইলে ভেরিফিকেশন লিংক পুনরায় পাঠানো হয়েছে।`, 'success');
+    } catch (error) {
+      showToast(formatFirebaseAuthError(error), 'error');
+    }
+  }, [showToast]);
+
+  const refreshAuthUser = useCallback(async () => {
+    if (!auth.currentUser) return;
+    try {
+      await auth.currentUser.reload();
+      await auth.currentUser.getIdToken(true);
+      setUser(auth.currentUser);
+      if (auth.currentUser.emailVerified) {
+        const role = await ensureUserProfile(auth.currentUser);
+        setUserRole(role);
+        showToast('ইমেইল ভেরিফিকেশন সম্পন্ন হয়েছে! ড্যাশবোর্ড আনলক হয়েছে।', 'success');
+      } else {
+        showToast('ইমেইল এখনো ভেরিফাই হয়নি। আপনার ইনবক্সের লিংকে ক্লিক করে আবার চেষ্টা করুন।', 'info');
+      }
+      setProviderRefreshTick((n) => n + 1);
+    } catch {
+      showToast('অ্যাকাউন্ট তথ্য রিফ্রেশ করা যায়নি। পুনরায় চেষ্টা করুন।', 'error');
+    }
+  }, [showToast]);
+
+  const changeAccountPassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<string | null> => {
+      const currentUser = auth.currentUser;
+      if (!currentUser || !currentUser.email) {
+        return 'পাসওয়ার্ড পরিবর্তনের জন্য আগে লগইন করুন।';
+      }
+
+      const alreadyHasPassword = currentUser.providerData.some(
+        (provider) => provider.providerId === 'password',
+      );
+
+      try {
+        if (!alreadyHasPassword) {
+          const emailCred = EmailAuthProvider.credential(currentUser.email, newPassword);
+          try {
+            await linkWithCredential(currentUser, emailCred);
+          } catch (linkErr) {
+            const code =
+              typeof linkErr === 'object' && linkErr !== null && 'code' in linkErr
+                ? String((linkErr as { code?: unknown }).code ?? '')
+                : '';
+            if (code === 'auth/requires-recent-login') {
+              await reauthenticateWithPopup(currentUser, googleProvider);
+              await linkWithCredential(currentUser, emailCred);
+            } else {
+              throw linkErr;
+            }
+          }
+          await currentUser.reload();
+          setUser(auth.currentUser);
+          setProviderRefreshTick((n) => n + 1);
+          showToast('নতুন ড্যাশবোর্ড পাসওয়ার্ড সফলভাবে সেট করা হয়েছে।', 'success');
+          return null;
+        }
+
+        const existingCred = EmailAuthProvider.credential(currentUser.email, currentPassword);
+        await reauthenticateWithCredential(currentUser, existingCred);
+        await updatePassword(currentUser, newPassword);
+        showToast('আপনার ড্যাশবোর্ড পাসওয়ার্ড সফলভাবে পরিবর্তন করা হয়েছে।', 'success');
+        return null;
+      } catch (error) {
+        return formatFirebaseAuthError(error);
+      }
+    },
+    [showToast],
+  );
+
+  const updateAdminUsername = useCallback(
+    async (newUsername: string): Promise<string | null> => {
+      if (!user || !isPrincipalAccess) {
+        return 'শুধুমাত্র প্রধান শিক্ষক অ্যাডমিন ইউজারনেম পরিবর্তন করতে পারবেন।';
+      }
+      const validation = validateUsernameChange(newUsername);
+      if (!validation.valid) {
+        return validation.errors.username ?? 'সঠিক ইউজারনেম লিখুন।';
+      }
+      const trimmed = newUsername.trim();
+      const nextSettings: SiteSettings = {
+        ...siteSettings,
+        adminUsername: trimmed,
+      };
+      try {
+        await saveSiteSettingsInFirestore(nextSettings, user.uid, true);
+        setSiteSettings(nextSettings);
+        showToast(`নতুন অ্যাডমিন ইউজারনেম "${trimmed}" সফলভাবে সংরক্ষিত হয়েছে।`, 'success');
+        return null;
+      } catch {
+        return 'ইউজারনেম সংরক্ষণ করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।';
+      }
+    },
+    [isPrincipalAccess, showToast, siteSettings, user],
+  );
 
   const signOutUser = useCallback(async () => {
     try {
       await signOut(auth);
+      setAuthError(null);
       showToast('সফলভাবে লগআউট সম্পন্ন হয়েছে।', 'info');
     } catch {
       showToast('লগআউট করতে সমস্যা হয়েছে।', 'error');
@@ -355,7 +616,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         showToast('ওয়েবসাইটের তথ্য পরিবর্তনের জন্য প্রধান শিক্ষক বা শিক্ষক লগইন আবশ্যক।', 'error');
         return;
       }
-      await saveSiteSettingsInFirestore(nextSettings, user.uid);
+      await saveSiteSettingsInFirestore(nextSettings, user.uid, false);
       setSiteSettings(nextSettings);
       showToast('ওয়েবসাইটের লোগো, ব্যানার, সেকশন ও তথ্য সফলভাবে সংরক্ষিত হয়েছে।', 'success');
     },
@@ -719,8 +980,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     userRole,
     hasStaffAccess,
     isPrincipalAccess,
+    hasPasswordProvider,
     isCloudSynced,
+    authError,
+    clearAuthError,
     signInWithGoogle,
+    signInWithUsernameOrEmail,
+    setupPrincipalPasswordAccount,
+    sendPasswordReset,
+    resendVerificationEmail,
+    refreshAuthUser,
+    changeAccountPassword,
+    updateAdminUsername,
     signOutUser,
     siteSettings,
     updateSiteSettings,

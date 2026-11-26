@@ -79,6 +79,7 @@ export interface SiteSettings {
   copyrightText: string;
   sectionVisibility: SectionVisibility;
   customSections: CustomSection[];
+  adminUsername: string;
   updatedBy?: string;
   updatedAt?: string;
 }

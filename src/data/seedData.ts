@@ -59,6 +59,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
     customSections: true,
   },
   customSections: [],
+  adminUsername: 'admin',
 };
 
 export const CLASS_PROGRAMS: ClassProgram[] = [

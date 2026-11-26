@@ -164,6 +164,10 @@ export function subscribePublicSiteSettings(
           customSections: vis.customSections !== false,
         },
         customSections,
+        adminUsername:
+          typeof data.adminUsername === 'string' && data.adminUsername.trim().length >= 3
+            ? data.adminUsername.trim()
+            : DEFAULT_SITE_SETTINGS.adminUsername,
         updatedBy: data.updatedBy ? String(data.updatedBy) : undefined,
         updatedAt: data.updatedAt ? formatTimestamp(data.updatedAt) : undefined,
       });
@@ -181,9 +185,10 @@ export function subscribePublicSiteSettings(
 export async function saveSiteSettingsInFirestore(
   settings: SiteSettings,
   updatedByUid: string,
+  includeAdminUsername = false,
 ): Promise<void> {
   const path = 'site_settings/main';
-  const payload = {
+  const payload: Record<string, unknown> = {
     siteName: sanitizeText(settings.siteName, 100),
     siteTagline: sanitizeText(settings.siteTagline, 160),
     logoUrl: settings.logoUrl.trim().slice(0, 200000),
@@ -225,8 +230,12 @@ export async function saveSiteSettingsInFirestore(
     updatedAt: serverTimestamp(),
   };
 
+  if (includeAdminUsername && settings.adminUsername.trim().length >= 3) {
+    payload.adminUsername = settings.adminUsername.trim().slice(0, 32);
+  }
+
   try {
-    await setDoc(doc(db, 'site_settings', 'main'), payload);
+    await setDoc(doc(db, 'site_settings', 'main'), payload, { merge: !includeAdminUsername });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

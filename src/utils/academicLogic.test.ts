@@ -14,16 +14,20 @@ import {
   getAllowedGroupsForClass,
   groupStudentsByClass,
   rankResultsWithMerit,
+  resolveLoginEmail,
   ROLL_NUMBER_REGEX,
   toBengaliDigits,
   validateAdmissionInput,
   validateCustomSectionInput,
+  validateLoginCredentials,
   validateNoticeInput,
+  validatePasswordChange,
   validatePaymentInput,
   validateResultInput,
   validateRoutineInput,
   validateSiteSettingsInput,
   validateStaffInput,
+  validateUsernameChange,
 } from './academicLogic';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
 import type { AdmissionRecord, NoticeItem, PaymentRecord, RoutineEntry, StudentResult } from '../types';
@@ -451,3 +455,37 @@ test('RBAC helpers strictly deny logged-out, unverified, and student users from 
     true,
   );
 });
+
+test('username alias resolution and password/username change validators enforce strict rules', () => {
+  assert.equal(
+    resolveLoginEmail('admin', 'admin', 'dark24dark24dark@gmail.com'),
+    'dark24dark24dark@gmail.com',
+  );
+  assert.equal(
+    resolveLoginEmail('USP_Boss', 'usp_boss', 'dark24dark24dark@gmail.com'),
+    'dark24dark24dark@gmail.com',
+  );
+  assert.equal(resolveLoginEmail('wrong_user', 'usp_boss', 'dark24dark24dark@gmail.com'), null);
+  assert.equal(
+    resolveLoginEmail('teacher@school.edu.bd', 'admin', 'dark24dark24dark@gmail.com'),
+    'teacher@school.edu.bd',
+  );
+  assert.equal(resolveLoginEmail('bad@email', 'admin', 'dark24dark24dark@gmail.com'), null);
+
+  assert.equal(validateLoginCredentials('a', '123').valid, false);
+  assert.equal(validateLoginCredentials('admin', 'secret123').valid, true);
+
+  assert.equal(validateUsernameChange('ab').valid, false);
+  assert.equal(validateUsernameChange('bad user!').valid, false);
+  assert.equal(validateUsernameChange('usp_admin_26').valid, true);
+
+  assert.equal(validatePasswordChange('', 'short', 'short', false).valid, false);
+  assert.equal(validatePasswordChange('', 'StrongPass12', 'Different12', false).valid, false);
+  assert.equal(validatePasswordChange('', 'StrongPass12', 'StrongPass12', false).valid, true);
+  assert.equal(validatePasswordChange('', 'StrongPass12', 'StrongPass12', true).valid, false);
+  assert.equal(
+    validatePasswordChange('OldPass12', 'NewStrong12', 'NewStrong12', true).valid,
+    true,
+  );
+});
+

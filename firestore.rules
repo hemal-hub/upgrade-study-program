@@ -163,7 +163,7 @@ service cloud.firestore {
 
     function isValidSiteSettings(data) {
       return data.keys().hasAll(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'updatedBy', 'updatedAt']) &&
-        data.keys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'updatedBy', 'updatedAt']) &&
+        data.keys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'adminUsername', 'updatedBy', 'updatedAt']) &&
         data.siteName is string && data.siteName.size() >= 2 && data.siteName.size() <= 100 &&
         data.siteTagline is string && data.siteTagline.size() >= 2 && data.siteTagline.size() <= 160 &&
         data.logoUrl is string && data.logoUrl.size() >= 1 && data.logoUrl.size() <= 200000 &&
@@ -183,6 +183,7 @@ service cloud.firestore {
         isValidSectionVisibility(data.sectionVisibility) &&
         data.customSections is list && data.customSections.size() <= 12 &&
         (data.customSections.size() == 0 || data.customSections[0] is map) &&
+        (!('adminUsername' in data) || (data.adminUsername is string && data.adminUsername.size() >= 3 && data.adminUsername.size() <= 32 && data.adminUsername.matches('^[a-zA-Z0-9_\\-]+$'))) &&
         isValidId(data.updatedBy) &&
         data.updatedAt is timestamp;
     }
@@ -350,7 +351,7 @@ service cloud.firestore {
       allow delete: if isPrincipal() && isValidId(paymentId);
     }
 
-    // 7. Site Settings CMS (Publicly readable; Staff/Principal manage)
+    // 7. Site Settings CMS (Publicly readable; Staff/Principal manage, only Principal changes adminUsername)
     match /site_settings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if true;
@@ -359,14 +360,16 @@ service cloud.firestore {
         isValidSiteSettings(incoming()) &&
         incoming().updatedBy == request.auth.uid &&
         incoming().updatedAt == request.time &&
-        isStaff();
+        ((!('adminUsername' in incoming()) && isStaff()) || isPrincipal());
       allow update: if isVerifiedUser() &&
         isValidId(settingId) &&
         isValidSiteSettings(incoming()) &&
         incoming().updatedBy == request.auth.uid &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'updatedBy', 'updatedAt']) &&
-        isStaff();
+        (
+          (isStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'updatedBy', 'updatedAt'])) ||
+          (isPrincipal() && incoming().diff(existing()).affectedKeys().hasOnly(['siteName', 'siteTagline', 'logoUrl', 'bannerUrl', 'heroKicker', 'heroTitle', 'heroSubtitle', 'primaryCtaText', 'secondaryCtaText', 'proofItems', 'footerDescription', 'contactAddress', 'contactPhone', 'contactEmail', 'copyrightText', 'sectionVisibility', 'customSections', 'adminUsername', 'updatedBy', 'updatedAt']))
+        );
       allow delete: if isPrincipal() && isValidId(settingId);
     }
 

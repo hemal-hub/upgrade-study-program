@@ -358,6 +358,12 @@
         "copyrightText": { "type": "string", "minLength": 2, "maxLength": 160 },
         "sectionVisibility": { "type": "object" },
         "customSections": { "type": "array" },
+        "adminUsername": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
         "updatedBy": {
           "type": "string",
           "minLength": 1,
