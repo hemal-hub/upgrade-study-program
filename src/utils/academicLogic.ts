@@ -4,16 +4,22 @@ import type {
   AdmissionRecord,
   BatchShift,
   ClassLevel,
+  CustomSection,
   DashboardMetrics,
   DayOfWeek,
+  GradeLetter,
   NoticeCategory,
   NoticeFormInput,
   NoticeItem,
   NoticeTargetClass,
   PaymentFormInput,
   PaymentRecord,
+  RankedStudentResult,
+  ResultFormInput,
   RoutineEntry,
   RoutineFormInput,
+  SiteSettings,
+  StudentResult,
   ValidationResult,
 } from '../types';
 
@@ -51,6 +57,7 @@ const BENGALI_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', 
 export const BD_PHONE_REGEX = /^01[3-9][0-9]{8}$/;
 export const TRX_ID_REGEX = /^[A-Za-z0-9-]+$/;
 export const ROLL_NUMBER_REGEX = /^USP-[0-9A-Z-]+$/;
+export const ISO_DATE_REGEX = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 
 export function toBengaliDigits(value: string | number): string {
   return String(value).replace(/\d/g, (digit) => BENGALI_DIGITS[Number(digit)] ?? digit);
@@ -110,18 +117,45 @@ export function sanitizeText(value: string, maxLength: number): string {
 export function validateAdmissionInput(input: AdmissionFormInput): ValidationResult {
   const errors: Record<string, string> = {};
   const studentName = sanitizeText(input.studentName, 100);
+  const fatherName = sanitizeText(input.fatherName, 100);
+  const motherName = sanitizeText(input.motherName, 100);
   const guardianName = sanitizeText(input.guardianName, 100);
   const guardianPhone = input.guardianPhone.trim().replace(/[\s-]/g, '');
+  const studentPhone = input.studentPhone.trim().replace(/[\s-]/g, '');
+  const dateOfBirth = input.dateOfBirth.trim();
+  const presentAddress = sanitizeText(input.presentAddress, 300);
+  const permanentAddress = sanitizeText(input.permanentAddress, 300);
   const schoolName = sanitizeText(input.schoolName, 150);
 
+  if (!input.studentPhoto || input.studentPhoto.trim().length < 10) {
+    errors.studentPhoto = 'শিক্ষার্থীর পাসপোর্ট সাইজ ছবি আপলোড করুন।';
+  }
   if (studentName.length < 2) {
     errors.studentName = 'শিক্ষার্থীর পূর্ণ নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (fatherName.length < 2) {
+    errors.fatherName = 'পিতার নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (motherName.length < 2) {
+    errors.motherName = 'মাতার নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
   }
   if (guardianName.length < 2) {
     errors.guardianName = 'অভিভাবকের নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
   }
+  if (!ISO_DATE_REGEX.test(dateOfBirth)) {
+    errors.dateOfBirth = 'শিক্ষার্থীর সঠিক জন্ম তারিখ নির্বাচন করুন।';
+  }
   if (!BD_PHONE_REGEX.test(guardianPhone)) {
     errors.guardianPhone = 'সঠিক ১১ সংখ্যার বাংলাদেশি মোবাইল নম্বর দিন (যেমন: 01712345678)।';
+  }
+  if (studentPhone.length > 0 && !BD_PHONE_REGEX.test(studentPhone)) {
+    errors.studentPhone = 'শিক্ষার্থীর মোবাইল নম্বর দিলে তা ১১ সংখ্যার হতে হবে (01XXXXXXXXX)।';
+  }
+  if (presentAddress.length < 3) {
+    errors.presentAddress = 'শিক্ষার্থীর বর্তমান ঠিকানা বিস্তারিত লিখুন।';
+  }
+  if (permanentAddress.length < 3) {
+    errors.permanentAddress = 'শিক্ষার্থীর স্থায়ী ঠিকানা বিস্তারিত লিখুন।';
   }
   if (schoolName.length < 2) {
     errors.schoolName = 'বর্তমান স্কুল বা কলেজের নাম লিখুন।';
@@ -203,6 +237,114 @@ export function validateRoutineInput(input: RoutineFormInput): ValidationResult 
   };
 }
 
+export function calculateBangladeshiGrade(
+  obtainedMarks: number,
+  fullMarks: number,
+): { gpa: number; grade: GradeLetter; percentage: number; passed: boolean } {
+  const safeFull = Math.max(1, fullMarks);
+  const clamped = Math.max(0, Math.min(safeFull, obtainedMarks));
+  const percentage = Number(((clamped / safeFull) * 100).toFixed(1));
+
+  if (percentage >= 80) return { gpa: 5.0, grade: 'A+', percentage, passed: true };
+  if (percentage >= 70) return { gpa: 4.0, grade: 'A', percentage, passed: true };
+  if (percentage >= 60) return { gpa: 3.5, grade: 'A-', percentage, passed: true };
+  if (percentage >= 50) return { gpa: 3.0, grade: 'B', percentage, passed: true };
+  if (percentage >= 40) return { gpa: 2.0, grade: 'C', percentage, passed: true };
+  if (percentage >= 33) return { gpa: 1.0, grade: 'D', percentage, passed: true };
+  return { gpa: 0.0, grade: 'F', percentage, passed: false };
+}
+
+export function validateResultInput(input: ResultFormInput): ValidationResult {
+  const errors: Record<string, string> = {};
+  if (sanitizeText(input.examName, 120).length < 2) {
+    errors.examName = 'পরীক্ষার নাম লিখুন (যেমন: মাসিক মডেল টেস্ট — নভেম্বর ২০২৬)।';
+  }
+  if (sanitizeText(input.subject, 100).length < 2) {
+    errors.subject = 'বিষয় বা পরীক্ষার ধরন লিখুন।';
+  }
+  if (!Number.isFinite(input.fullMarks) || input.fullMarks < 10 || input.fullMarks > 1000) {
+    errors.fullMarks = 'পূর্ণমান ১০ থেকে ১০০০-এর মধ্যে হতে হবে।';
+  }
+  if (
+    !Number.isFinite(input.obtainedMarks) ||
+    input.obtainedMarks < 0 ||
+    input.obtainedMarks > input.fullMarks
+  ) {
+    errors.obtainedMarks = `প্রাপ্ত নম্বর ০ থেকে ${toBengaliDigits(input.fullMarks)}-এর মধ্যে হতে হবে।`;
+  }
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function rankResultsWithMerit(results: StudentResult[]): RankedStudentResult[] {
+  const sorted = [...results].sort((a, b) => {
+    const pctA = a.fullMarks > 0 ? a.obtainedMarks / a.fullMarks : 0;
+    const pctB = b.fullMarks > 0 ? b.obtainedMarks / b.fullMarks : 0;
+    if (pctB !== pctA) return pctB - pctA;
+    return b.obtainedMarks - a.obtainedMarks;
+  });
+
+  return sorted.map((item, idx) => ({
+    ...item,
+    meritPosition: idx + 1,
+    percentage: item.fullMarks > 0 ? Number(((item.obtainedMarks / item.fullMarks) * 100).toFixed(1)) : 0,
+  }));
+}
+
+export function groupStudentsByClass(
+  admissions: AdmissionRecord[],
+): Record<ClassLevel, AdmissionRecord[]> {
+  const grouped: Record<ClassLevel, AdmissionRecord[]> = {
+    '৬ষ্ঠ': [],
+    '৭ম': [],
+    '৮ম': [],
+    '৯ম': [],
+    '১০ম': [],
+    'একাদশ': [],
+  };
+  for (const adm of admissions) {
+    if (grouped[adm.classLevel]) {
+      grouped[adm.classLevel].push(adm);
+    }
+  }
+  return grouped;
+}
+
+export function validateCustomSectionInput(
+  input: Omit<CustomSection, 'id'>,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  if (sanitizeText(input.title, 120).length < 2) {
+    errors.title = 'সেকশনের শিরোনাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (input.body.trim().length < 5) {
+    errors.body = 'সেকশনের বিবরণ কমপক্ষে ৫ অক্ষরের হতে হবে।';
+  }
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function validateSiteSettingsInput(input: SiteSettings): ValidationResult {
+  const errors: Record<string, string> = {};
+  if (sanitizeText(input.siteName, 100).length < 2) {
+    errors.siteName = 'প্রতিষ্ঠানের নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (sanitizeText(input.heroTitle, 220).length < 3) {
+    errors.heroTitle = 'হিরো শিরোনাম কমপক্ষে ৩ অক্ষরের হতে হবে।';
+  }
+  if (sanitizeText(input.contactPhone, 80).length < 4) {
+    errors.contactPhone = 'যোগাযোগের মোবাইল নম্বর দিন।';
+  }
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
 export function filterAndSortRoutines(
   routines: RoutineEntry[],
   options: {
@@ -275,7 +417,8 @@ export function findStudentAdmission(
   return admissions.find(
     (adm) =>
       adm.rollNumber.toLowerCase() === normalized ||
-      adm.guardianPhone.replace(/[\s-]/g, '') === normalized,
+      adm.guardianPhone.replace(/[\s-]/g, '') === normalized ||
+      (adm.studentPhone && adm.studentPhone.replace(/[\s-]/g, '') === normalized),
   );
 }
 
@@ -355,4 +498,3 @@ export function validateStaffInput(input: {
     errors,
   };
 }
-

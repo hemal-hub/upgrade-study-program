@@ -2,15 +2,20 @@ import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Award,
+  Camera,
   CheckCircle2,
   CreditCard,
   Printer,
   Search,
   ShieldCheck,
   Smartphone,
+  Trash2,
+  User as UserIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
+import { DEFAULT_LOGO_URL } from '../data/seedData';
 import type {
   AcademicGroup,
   AdmissionFormInput,
@@ -33,6 +38,7 @@ import {
   validateAdmissionInput,
   validatePaymentInput,
 } from '../utils/academicLogic';
+import { compressImageFile, createStudentAvatarSvg } from '../utils/imageUtils';
 
 type AdmissionTab = 'apply' | 'portal';
 type WizardStep = 1 | 2 | 3;
@@ -69,12 +75,33 @@ const PAYMENT_METHODS: Array<{
   },
 ];
 
+function createInitialFormState(classLevel: ClassLevel): AdmissionFormInput {
+  return {
+    studentName: '',
+    fatherName: '',
+    motherName: '',
+    guardianName: '',
+    guardianPhone: '',
+    studentPhone: '',
+    dateOfBirth: '',
+    presentAddress: '',
+    permanentAddress: '',
+    studentPhoto: '',
+    schoolName: '',
+    classLevel,
+    group: getAllowedGroupsForClass(classLevel)[0],
+    batchShift: BATCH_SHIFTS[1],
+  };
+}
+
 export function AdmissionPaymentView() {
   const {
     preselectedClass,
+    siteSettings,
     admissions,
     payments,
     routines,
+    results,
     user,
     signInWithGoogle,
     submitAdmissionWithPayment,
@@ -84,16 +111,12 @@ export function AdmissionPaymentView() {
   const [tab, setTab] = useState<AdmissionTab>('apply');
   const [step, setStep] = useState<WizardStep>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sameAsPresent, setSameAsPresent] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  const [formData, setFormData] = useState<AdmissionFormInput>({
-    studentName: '',
-    guardianName: '',
-    guardianPhone: '',
-    schoolName: '',
-    classLevel: preselectedClass,
-    group: getAllowedGroupsForClass(preselectedClass)[0],
-    batchShift: BATCH_SHIFTS[1],
-  });
+  const [formData, setFormData] = useState<AdmissionFormInput>(() =>
+    createInitialFormState(preselectedClass),
+  );
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   const [paymentData, setPaymentData] = useState<PaymentFormInput>({
@@ -122,6 +145,7 @@ export function AdmissionPaymentView() {
     }));
   }, [preselectedClass]);
 
+  const isDefaultLogo = siteSettings.logoUrl === DEFAULT_LOGO_URL;
   const allowedGroups = getAllowedGroupsForClass(formData.classLevel);
   const feeSummary = calculateFeeBreakdown(formData.classLevel, formData.group);
   const activePaymentMethod =
@@ -135,6 +159,29 @@ export function AdmissionPaymentView() {
       group: nextGroups.includes(prev.group) ? prev.group : nextGroups[0],
     }));
     setFormErrors((prev) => ({ ...prev, group: '' }));
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 260,
+        maxHeight: 260,
+        quality: 0.72,
+        maxDataUrlChars: 160000,
+      });
+      setFormData((prev) => ({ ...prev, studentPhoto: compressed }));
+      setFormErrors((prev) => ({ ...prev, studentPhoto: '' }));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'ছবি আপলোড করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+      setFormErrors((prev) => ({ ...prev, studentPhoto: message }));
+    } finally {
+      setUploadingPhoto(false);
+      e.target.value = '';
+    }
   };
 
   const handleProceedToPayment = (e: React.FormEvent) => {
@@ -172,15 +219,8 @@ export function AdmissionPaymentView() {
   };
 
   const handleResetWizard = () => {
-    setFormData({
-      studentName: '',
-      guardianName: '',
-      guardianPhone: '',
-      schoolName: '',
-      classLevel: preselectedClass,
-      group: getAllowedGroupsForClass(preselectedClass)[0],
-      batchShift: BATCH_SHIFTS[1],
-    });
+    setFormData(createInitialFormState(preselectedClass));
+    setSameAsPresent(false);
     setPaymentData({ method: 'bKash', senderNumber: '', transactionId: '' });
     setFormErrors({});
     setPaymentErrors({});
@@ -196,7 +236,9 @@ export function AdmissionPaymentView() {
   };
 
   const lookupPayments = lookupResult
-    ? payments.filter((p) => p.admissionId === lookupResult.id || p.rollNumber === lookupResult.rollNumber)
+    ? payments.filter(
+        (p) => p.admissionId === lookupResult.id || p.rollNumber === lookupResult.rollNumber,
+      )
     : [];
 
   const lookupRoutines = lookupResult
@@ -204,6 +246,12 @@ export function AdmissionPaymentView() {
         classLevel: lookupResult.classLevel,
         group: lookupResult.group,
       })
+    : [];
+
+  const lookupResults = lookupResult
+    ? results.filter(
+        (r) => r.admissionId === lookupResult.id || r.rollNumber === lookupResult.rollNumber,
+      )
     : [];
 
   return (
@@ -216,8 +264,8 @@ export function AdmissionPaymentView() {
             অনলাইন ভর্তি, পেমেন্ট গেটওয়ে ও শিক্ষার্থী পোর্টাল
           </h1>
           <p className="text-[15px] text-[#57534E]">
-            তিনটি সহজ ধাপে ভর্তি আবেদন সম্পন্ন করে তাৎক্ষণিক ডিজিটাল রোল নম্বর ও মানি রিসিট
-            সংগ্রহ করুন।
+            শিক্ষার্থীর ছবিসহ পূর্ণাঙ্গ তথ্য দিয়ে তিনটি সহজ ধাপে ভর্তি আবেদন সম্পন্ন করুন এবং
+            তাৎক্ষণিক রোল নম্বর ও ডিজিটাল মানি রিসিট সংগ্রহ করুন।
           </p>
         </div>
 
@@ -259,7 +307,8 @@ export function AdmissionPaymentView() {
       {!user && tab === 'apply' && (
         <div className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print">
           <p className="text-sm text-[#44403C]">
-            স্থায়ী ক্লাউড ডাটাবেজে আপনার ভর্তি ও পেমেন্ট রেকর্ড সংরক্ষণ করতে চাইলে Google অ্যাকাউন্ট দিয়ে সাইন ইন করুন।
+            স্থায়ী ক্লাউড ডাটাবেজে আপনার ভর্তি ও পেমেন্ট রেকর্ড সংরক্ষণ করতে চাইলে Google অ্যাকাউন্ট
+            দিয়ে সাইন ইন করুন।
           </p>
           <button
             type="button"
@@ -276,7 +325,7 @@ export function AdmissionPaymentView() {
           {/* 3-Step Progress Indicator */}
           <ol className="grid grid-cols-1 sm:grid-cols-3 gap-4 no-print" aria-label="ভর্তির ধাপসমূহ">
             {[
-              { num: 1, title: '০১. শিক্ষার্থীর তথ্য', desc: 'শ্রেণি, বিভাগ ও ব্যাচ নির্বাচন' },
+              { num: 1, title: '০১. শিক্ষার্থীর তথ্য ও ছবি', desc: 'ব্যক্তিগত, অভিভাবক, ঠিকানা ও ব্যাচ' },
               { num: 2, title: '০২. অনলাইন পেমেন্ট', desc: 'বিকাশ, নগদ, রকেট বা কার্ড' },
               { num: 3, title: '০৩. ডিজিটাল রশিদ', desc: 'রোল নম্বর ও ভর্তি নিশ্চিতকরণ' },
             ].map((item) => {
@@ -323,10 +372,86 @@ export function AdmissionPaymentView() {
                 noValidate
                 className="lg:col-span-8 bg-white border border-[#E7E2DA] rounded-2xl p-6 sm:p-8 space-y-6"
               >
-                <h2 className="text-xl font-bold text-[#1C1917] pb-3 border-b border-[#F0EBE3]">
-                  শিক্ষার্থী ও অভিভাবকের তথ্য
-                </h2>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <h2 className="text-xl font-bold text-[#1C1917]">
+                    শিক্ষার্থী, পিতা-মাতা ও অভিভাবকের পূর্ণাঙ্গ তথ্য
+                  </h2>
+                  <p className="text-xs text-[#78716C] mt-1">
+                    তারকা (*) চিহ্নিত ঘরগুলো আবশ্যক। প্রদত্ত ছবি শিক্ষার্থীর প্রোফাইল ও রেজাল্ট শিটে
+                    ব্যবহৃত হবে।
+                  </p>
+                </div>
 
+                {/* Student Passport Photo Upload */}
+                <div className="bg-[#FAF8F5] border border-[#E7E2DA] rounded-xl p-4 sm:p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="w-24 h-24 rounded-xl bg-white border border-[#D6CFC5] overflow-hidden flex items-center justify-center shrink-0">
+                      {formData.studentPhoto ? (
+                        <img
+                          src={formData.studentPhoto}
+                          alt="শিক্ষার্থীর আপলোডকৃত ছবি"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <UserIcon className="w-10 h-10 text-[#A8A29E]" />
+                      )}
+                    </div>
+
+                    <div className="space-y-2 flex-1 min-w-0">
+                      <label
+                        htmlFor="studentPhoto"
+                        className="block text-sm font-semibold text-[#1C1917]"
+                      >
+                        শিক্ষার্থীর পাসপোর্ট সাইজ ছবি *
+                      </label>
+                      <p className="text-xs text-[#57534E]">
+                        সদ্য তোলা স্পষ্ট মুখমণ্ডলের ছবি (JPG, PNG বা WebP)। ছবিটি স্বয়ংক্রিয়ভাবে
+                        অপ্টিমাইজ হয়ে সংরক্ষিত হবে।
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                        <label
+                          htmlFor="studentPhoto"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#7A0D14] text-white text-xs font-semibold rounded-lg hover:bg-[#5E090F] transition-colors cursor-pointer"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>
+                            {uploadingPhoto
+                              ? 'প্রক্রিয়াকরণ হচ্ছে...'
+                              : formData.studentPhoto
+                                ? 'ছবি পরিবর্তন করুন'
+                                : 'ছবি আপলোড করুন'}
+                          </span>
+                        </label>
+                        <input
+                          id="studentPhoto"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => void handlePhotoUpload(e)}
+                          className="sr-only"
+                        />
+                        {formData.studentPhoto && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({ ...prev, studentPhoto: '' }))
+                            }
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-[#B91C1C] bg-white border border-[#E7E2DA] rounded-lg hover:border-[#B91C1C] transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>মুছুন</span>
+                          </button>
+                        )}
+                      </div>
+                      {formErrors.studentPhoto && (
+                        <p role="alert" className="text-xs text-[#B91C1C]">
+                          {formErrors.studentPhoto}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Personal & Family Details */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div className="space-y-1.5">
                     <label htmlFor="studentName" className="block text-sm font-semibold text-[#1C1917]">
@@ -351,6 +476,71 @@ export function AdmissionPaymentView() {
                   </div>
 
                   <div className="space-y-1.5">
+                    <label htmlFor="dateOfBirth" className="block text-sm font-semibold text-[#1C1917]">
+                      শিক্ষার্থীর জন্ম তারিখ *
+                    </label>
+                    <input
+                      id="dateOfBirth"
+                      type="date"
+                      value={formData.dateOfBirth}
+                      onChange={(e) => {
+                        setFormData({ ...formData, dateOfBirth: e.target.value });
+                        setFormErrors((prev) => ({ ...prev, dateOfBirth: '' }));
+                      }}
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm font-mono-tabular text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.dateOfBirth && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.dateOfBirth}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="fatherName" className="block text-sm font-semibold text-[#1C1917]">
+                      পিতার নাম *
+                    </label>
+                    <input
+                      id="fatherName"
+                      type="text"
+                      value={formData.fatherName}
+                      onChange={(e) => {
+                        setFormData({ ...formData, fatherName: e.target.value });
+                        setFormErrors((prev) => ({ ...prev, fatherName: '' }));
+                      }}
+                      placeholder="যেমন: মোঃ কামরুল হাসান"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.fatherName && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.fatherName}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="motherName" className="block text-sm font-semibold text-[#1C1917]">
+                      মাতার নাম *
+                    </label>
+                    <input
+                      id="motherName"
+                      type="text"
+                      value={formData.motherName}
+                      onChange={(e) => {
+                        setFormData({ ...formData, motherName: e.target.value });
+                        setFormErrors((prev) => ({ ...prev, motherName: '' }));
+                      }}
+                      placeholder="যেমন: শামীমা আক্তার"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.motherName && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.motherName}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
                     <label htmlFor="guardianName" className="block text-sm font-semibold text-[#1C1917]">
                       অভিভাবকের নাম *
                     </label>
@@ -362,7 +552,7 @@ export function AdmissionPaymentView() {
                         setFormData({ ...formData, guardianName: e.target.value });
                         setFormErrors((prev) => ({ ...prev, guardianName: '' }));
                       }}
-                      placeholder="যেমন: মোঃ রফিকুল ইসলাম"
+                      placeholder="যেমন: মোঃ কামরুল হাসান (পিতা)"
                       className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
                     />
                     {formErrors.guardianName && (
@@ -395,6 +585,28 @@ export function AdmissionPaymentView() {
                   </div>
 
                   <div className="space-y-1.5">
+                    <label htmlFor="studentPhone" className="block text-sm font-semibold text-[#1C1917]">
+                      শিক্ষার্থীর মোবাইল নম্বর (ঐচ্ছিক)
+                    </label>
+                    <input
+                      id="studentPhone"
+                      type="tel"
+                      value={formData.studentPhone}
+                      onChange={(e) => {
+                        setFormData({ ...formData, studentPhone: e.target.value });
+                        setFormErrors((prev) => ({ ...prev, studentPhone: '' }));
+                      }}
+                      placeholder="018XXXXXXXX"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm font-mono-tabular text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.studentPhone && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.studentPhone}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
                     <label htmlFor="schoolName" className="block text-sm font-semibold text-[#1C1917]">
                       বর্তমান স্কুল / কলেজের নাম *
                     </label>
@@ -412,6 +624,88 @@ export function AdmissionPaymentView() {
                     {formErrors.schoolName && (
                       <p role="alert" className="text-xs text-[#B91C1C]">
                         {formErrors.schoolName}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Addresses */}
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label
+                      htmlFor="presentAddress"
+                      className="block text-sm font-semibold text-[#1C1917]"
+                    >
+                      বর্তমান ঠিকানা *
+                    </label>
+                    <textarea
+                      id="presentAddress"
+                      rows={2}
+                      value={formData.presentAddress}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData((prev) => ({
+                          ...prev,
+                          presentAddress: val,
+                          permanentAddress: sameAsPresent ? val : prev.permanentAddress,
+                        }));
+                        setFormErrors((prev) => ({
+                          ...prev,
+                          presentAddress: '',
+                          permanentAddress: sameAsPresent ? '' : prev.permanentAddress,
+                        }));
+                      }}
+                      placeholder="বাসা/হোল্ডিং নম্বর, রোড, এলাকা, থানা ও জেলা"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.presentAddress && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.presentAddress}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label
+                        htmlFor="permanentAddress"
+                        className="block text-sm font-semibold text-[#1C1917]"
+                      >
+                        স্থায়ী ঠিকানা *
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#57534E] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={sameAsPresent}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSameAsPresent(checked);
+                            if (checked) {
+                              setFormData((prev) => ({
+                                ...prev,
+                                permanentAddress: prev.presentAddress,
+                              }));
+                              setFormErrors((prev) => ({ ...prev, permanentAddress: '' }));
+                            }
+                          }}
+                          className="w-3.5 h-3.5 accent-[#7A0D14]"
+                        />
+                        <span>বর্তমান ঠিকানার অনুরূপ</span>
+                      </label>
+                    </div>
+                    <textarea
+                      id="permanentAddress"
+                      rows={2}
+                      value={formData.permanentAddress}
+                      onChange={(e) => {
+                        setSameAsPresent(false);
+                        setFormData({ ...formData, permanentAddress: e.target.value });
+                        setFormErrors((prev) => ({ ...prev, permanentAddress: '' }));
+                      }}
+                      placeholder="গ্রাম/মহল্লা, ডাকঘর, উপজেলা ও জেলা"
+                      className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#D6CFC5] rounded-lg text-sm text-[#1C1917] focus:outline-none focus:border-[#7A0D14]"
+                    />
+                    {formErrors.permanentAddress && (
+                      <p role="alert" className="text-xs text-[#B91C1C]">
+                        {formErrors.permanentAddress}
                       </p>
                     )}
                   </div>
@@ -501,9 +795,9 @@ export function AdmissionPaymentView() {
                 <div className="flex items-center gap-3 pb-4 border-b border-[#F0EBE3]">
                   <span className="w-11 h-11 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
                     <img
-                      src="/assets/aistudio/image_563094c6.svg"
-                      alt="USP লোগো"
-                      className="w-11 h-11 object-contain scale-[1.55]"
+                      src={siteSettings.logoUrl}
+                      alt={`${siteSettings.siteName} লোগো`}
+                      className={`w-11 h-11 object-contain ${isDefaultLogo ? 'scale-[1.55]' : ''}`}
                       referrerPolicy="no-referrer"
                     />
                   </span>
@@ -569,7 +863,11 @@ export function AdmissionPaymentView() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5" role="radiogroup" aria-label="পেমেন্ট মাধ্যম">
+                <div
+                  className="grid grid-cols-1 sm:grid-cols-2 gap-3.5"
+                  role="radiogroup"
+                  aria-label="পেমেন্ট মাধ্যম"
+                >
                   {PAYMENT_METHODS.map((pm) => {
                     const active = paymentData.method === pm.id;
                     return (
@@ -640,7 +938,10 @@ export function AdmissionPaymentView() {
 
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <label htmlFor="transactionId" className="block text-sm font-semibold text-[#1C1917]">
+                      <label
+                        htmlFor="transactionId"
+                        className="block text-sm font-semibold text-[#1C1917]"
+                      >
                         ট্রানজেকশন আইডি (TrxID) *
                       </label>
                       <button
@@ -648,7 +949,10 @@ export function AdmissionPaymentView() {
                         onClick={() => {
                           const prefix = paymentData.method.slice(0, 3).toUpperCase();
                           const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-                          setPaymentData((prev) => ({ ...prev, transactionId: `${prefix}${rand}26` }));
+                          setPaymentData((prev) => ({
+                            ...prev,
+                            transactionId: `${prefix}${rand}26`,
+                          }));
                           setPaymentErrors((prev) => ({ ...prev, transactionId: '' }));
                         }}
                         className="text-xs font-medium text-[#7A0D14] hover:underline cursor-pointer"
@@ -690,7 +994,9 @@ export function AdmissionPaymentView() {
                     className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] disabled:opacity-60 transition-colors cursor-pointer"
                   >
                     <span>
-                      {isSubmitting ? 'পেমেন্ট প্রক্রিয়াকরণ হচ্ছে...' : 'পেমেন্ট নিশ্চিত ও ভর্তি সম্পন্ন করুন'}
+                      {isSubmitting
+                        ? 'পেমেন্ট প্রক্রিয়াকরণ হচ্ছে...'
+                        : 'পেমেন্ট নিশ্চিত ও ভর্তি সম্পন্ন করুন'}
                     </span>
                     <CheckCircle2 className="w-4 h-4" />
                   </button>
@@ -698,18 +1004,34 @@ export function AdmissionPaymentView() {
               </form>
 
               <aside className="lg:col-span-4 bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-4">
-                <h3 className="text-base font-bold text-[#1C1917] pb-3 border-b border-[#F0EBE3]">
-                  আবেদনকারীর সারসংক্ষেপ
-                </h3>
+                <div className="flex items-center gap-3 pb-3 border-b border-[#F0EBE3]">
+                  <img
+                    src={formData.studentPhoto || createStudentAvatarSvg(formData.studentName, 0)}
+                    alt={formData.studentName}
+                    className="w-12 h-12 rounded-xl object-cover border border-[#E7E2DA] shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <h3 className="text-base font-bold text-[#1C1917] truncate">
+                      {formData.studentName}
+                    </h3>
+                    <p className="text-xs text-[#78716C]">
+                      {formData.classLevel} শ্রেণি · {formData.group}
+                    </p>
+                  </div>
+                </div>
                 <dl className="space-y-2.5 text-sm">
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#78716C]">শিক্ষার্থী</dt>
-                    <dd className="font-semibold text-[#1C1917] text-right">{formData.studentName}</dd>
+                    <dt className="text-[#78716C]">পিতা</dt>
+                    <dd className="font-medium text-[#1C1917] text-right">{formData.fatherName}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#78716C]">শ্রেণি ও বিভাগ</dt>
-                    <dd className="font-semibold text-[#1C1917] text-right">
-                      {formData.classLevel} · {formData.group}
+                    <dt className="text-[#78716C]">মাতা</dt>
+                    <dd className="font-medium text-[#1C1917] text-right">{formData.motherName}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-[#78716C]">জন্ম তারিখ</dt>
+                    <dd className="font-mono-tabular text-[#1C1917] text-right">
+                      {formData.dateOfBirth}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-2">
@@ -717,7 +1039,7 @@ export function AdmissionPaymentView() {
                     <dd className="text-[#44403C] text-right">{formData.batchShift}</dd>
                   </div>
                   <div className="flex justify-between gap-2">
-                    <dt className="text-[#78716C]">মোবাইল</dt>
+                    <dt className="text-[#78716C]">অভিভাবকের মোবাইল</dt>
                     <dd className="font-mono-tabular text-[#1C1917]">{formData.guardianPhone}</dd>
                   </div>
                   <div className="pt-3 border-t border-[#E7E2DA] flex justify-between gap-2">
@@ -742,9 +1064,9 @@ export function AdmissionPaymentView() {
                 <div className="flex items-center gap-3.5">
                   <span className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center shrink-0">
                     <img
-                      src="/assets/aistudio/image_563094c6.svg"
-                      alt="আপগ্রেড স্টাডি প্রোগ্রাম লোগো"
-                      className="w-16 h-16 object-contain scale-[1.55]"
+                      src={siteSettings.logoUrl}
+                      alt={`${siteSettings.siteName} লোগো`}
+                      className={`w-16 h-16 object-contain ${isDefaultLogo ? 'scale-[1.55]' : ''}`}
                       referrerPolicy="no-referrer"
                     />
                   </span>
@@ -754,15 +1076,25 @@ export function AdmissionPaymentView() {
                       <span>অনলাইন ভর্তি ও পেমেন্ট গৃহীত হয়েছে</span>
                     </p>
                     <h2 className="text-2xl font-bold text-[#1C1917] mt-0.5">
-                      আপগ্রেড স্টাডি প্রোগ্রাম — ভর্তি রশিদ
+                      {siteSettings.siteName} — ভর্তি রশিদ
                     </h2>
                   </div>
                 </div>
-                <div className="sm:text-right">
-                  <p className="text-xs text-[#78716C]">শিক্ষার্থী রোল নম্বর</p>
-                  <p className="text-lg font-bold font-mono-tabular text-[#7A0D14]">
-                    {completedReceipt.admission.rollNumber}
-                  </p>
+                <div className="flex items-center gap-3 sm:flex-row-reverse">
+                  <img
+                    src={
+                      completedReceipt.admission.studentPhoto ||
+                      createStudentAvatarSvg(completedReceipt.admission.studentName, 0)
+                    }
+                    alt={completedReceipt.admission.studentName}
+                    className="w-16 h-16 rounded-xl object-cover border border-[#D6CFC5] shrink-0"
+                  />
+                  <div className="sm:text-right">
+                    <p className="text-xs text-[#78716C]">শিক্ষার্থী রোল নম্বর</p>
+                    <p className="text-lg font-bold font-mono-tabular text-[#7A0D14]">
+                      {completedReceipt.admission.rollNumber}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -771,6 +1103,24 @@ export function AdmissionPaymentView() {
                   <dt className="text-xs text-[#78716C]">শিক্ষার্থীর নাম</dt>
                   <dd className="font-semibold text-[#1C1917] mt-0.5">
                     {completedReceipt.admission.studentName}
+                  </dd>
+                </div>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">জন্ম তারিখ</dt>
+                  <dd className="font-semibold font-mono-tabular text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.dateOfBirth}
+                  </dd>
+                </div>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">পিতার নাম</dt>
+                  <dd className="font-semibold text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.fatherName}
+                  </dd>
+                </div>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">মাতার নাম</dt>
+                  <dd className="font-semibold text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.motherName}
                   </dd>
                 </div>
                 <div className="pb-3 border-b border-[#F0EBE3]">
@@ -783,27 +1133,43 @@ export function AdmissionPaymentView() {
                   </dd>
                 </div>
                 <div className="pb-3 border-b border-[#F0EBE3]">
-                  <dt className="text-xs text-[#78716C]">শ্রেণি ও বিভাগ</dt>
+                  <dt className="text-xs text-[#78716C]">শিক্ষার্থীর মোবাইল ও প্রতিষ্ঠান</dt>
                   <dd className="font-semibold text-[#1C1917] mt-0.5">
-                    {completedReceipt.admission.classLevel} শ্রেণি ({completedReceipt.admission.group})
+                    {completedReceipt.admission.studentPhone
+                      ? `${completedReceipt.admission.studentPhone} · `
+                      : ''}
+                    {completedReceipt.admission.schoolName}
                   </dd>
                 </div>
                 <div className="pb-3 border-b border-[#F0EBE3]">
-                  <dt className="text-xs text-[#78716C]">ব্যাচ শিফট</dt>
+                  <dt className="text-xs text-[#78716C]">বর্তমান ঠিকানা</dt>
+                  <dd className="font-medium text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.presentAddress}
+                  </dd>
+                </div>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">স্থায়ী ঠিকানা</dt>
+                  <dd className="font-medium text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.permanentAddress}
+                  </dd>
+                </div>
+                <div className="pb-3 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">শ্রেণি, বিভাগ ও শিফট</dt>
                   <dd className="font-semibold text-[#1C1917] mt-0.5">
+                    {completedReceipt.admission.classLevel} শ্রেণি ({completedReceipt.admission.group}) ·{' '}
                     {completedReceipt.admission.batchShift}
                   </dd>
                 </div>
                 <div className="pb-3 border-b border-[#F0EBE3]">
-                  <dt className="text-xs text-[#78716C]">পেমেন্ট মাধ্যম ও TrxID</dt>
-                  <dd className="font-semibold font-mono-tabular text-[#1C1917] mt-0.5">
-                    {completedReceipt.payment.method} · {completedReceipt.payment.transactionId}
-                  </dd>
-                </div>
-                <div className="pb-3 border-b border-[#F0EBE3]">
-                  <dt className="text-xs text-[#78716C]">পরিশোধিত পরিমাণ</dt>
-                  <dd className="font-bold text-[#7A0D14] tabular-nums mt-0.5">
-                    {formatBdt(completedReceipt.payment.amount)}
+                  <dt className="text-xs text-[#78716C]">পেমেন্ট মাধ্যম, TrxID ও পরিমাণ</dt>
+                  <dd className="font-semibold text-[#1C1917] mt-0.5">
+                    <span className="font-mono-tabular">
+                      {completedReceipt.payment.method} · {completedReceipt.payment.transactionId}
+                    </span>{' '}
+                    ·{' '}
+                    <span className="font-bold text-[#7A0D14] tabular-nums">
+                      {formatBdt(completedReceipt.payment.amount)}
+                    </span>
                   </dd>
                 </div>
               </dl>
@@ -843,7 +1209,7 @@ export function AdmissionPaymentView() {
             className="bg-white border border-[#E7E2DA] rounded-2xl p-6 sm:p-8 space-y-4"
           >
             <h2 className="text-xl font-bold text-[#1C1917]">
-              রোল নম্বর বা অভিভাবকের মোবাইল দিয়ে ক্লাসের তথ্য দেখুন
+              রোল নম্বর বা মোবাইল দিয়ে শিক্ষার্থীর তথ্য, রুটিন ও রেজাল্ট দেখুন
             </h2>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
@@ -889,7 +1255,8 @@ export function AdmissionPaymentView() {
                 এই রোল বা মোবাইল নম্বরে কোনো শিক্ষার্থীর তথ্য পাওয়া যায়নি
               </p>
               <p className="text-sm text-[#57534E]">
-                সঠিক ইউএসপি রোল নম্বর (যেমন: USP-09-2026-0001) অথবা ভর্তি ফরমে দেওয়া মোবাইল নম্বর দিয়ে চেষ্টা করুন।
+                সঠিক ইউএসপি রোল নম্বর (যেমন: USP-09-2026-0001) অথবা ভর্তি ফরমে দেওয়া মোবাইল নম্বর
+                দিয়ে চেষ্টা করুন।
               </p>
             </div>
           )}
@@ -897,27 +1264,67 @@ export function AdmissionPaymentView() {
           {lookupResult && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               <section className="lg:col-span-5 bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-5">
-                <div className="pb-4 border-b border-[#F0EBE3]">
-                  <p className="text-xs font-mono-tabular font-semibold text-[#7A0D14]">
-                    {lookupResult.rollNumber}
-                  </p>
-                  <h3 className="text-xl font-bold text-[#1C1917] mt-0.5">
-                    {lookupResult.studentName}
-                  </h3>
-                  <p className="text-sm text-[#57534E]">{lookupResult.schoolName}</p>
+                <div className="flex items-center gap-4 pb-4 border-b border-[#F0EBE3]">
+                  <img
+                    src={
+                      lookupResult.studentPhoto ||
+                      createStudentAvatarSvg(lookupResult.studentName, 0)
+                    }
+                    alt={lookupResult.studentName}
+                    className="w-16 h-16 rounded-xl object-cover border border-[#E7E2DA] shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-xs font-mono-tabular font-semibold text-[#7A0D14]">
+                      {lookupResult.rollNumber}
+                    </p>
+                    <h3 className="text-xl font-bold text-[#1C1917] mt-0.5 truncate">
+                      {lookupResult.studentName}
+                    </h3>
+                    <p className="text-xs text-[#57534E] truncate">{lookupResult.schoolName}</p>
+                  </div>
                 </div>
 
-                <dl className="space-y-3 text-sm">
+                <dl className="space-y-2.5 text-sm">
                   <div className="flex justify-between gap-2">
                     <dt className="text-[#78716C]">শ্রেণি ও বিভাগ</dt>
-                    <dd className="font-semibold text-[#1C1917]">
+                    <dd className="font-semibold text-[#1C1917] text-right">
                       {lookupResult.classLevel} শ্রেণি · {lookupResult.group}
                     </dd>
                   </div>
                   <div className="flex justify-between gap-2">
                     <dt className="text-[#78716C]">ব্যাচ সময়</dt>
-                    <dd className="font-medium text-[#1C1917]">{lookupResult.batchShift}</dd>
+                    <dd className="font-medium text-[#1C1917] text-right">
+                      {lookupResult.batchShift}
+                    </dd>
                   </div>
+                  {lookupResult.fatherName && (
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-[#78716C]">পিতার নাম</dt>
+                      <dd className="text-[#1C1917] text-right">{lookupResult.fatherName}</dd>
+                    </div>
+                  )}
+                  {lookupResult.motherName && (
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-[#78716C]">মাতার নাম</dt>
+                      <dd className="text-[#1C1917] text-right">{lookupResult.motherName}</dd>
+                    </div>
+                  )}
+                  {lookupResult.dateOfBirth && (
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-[#78716C]">জন্ম তারিখ</dt>
+                      <dd className="font-mono-tabular text-[#1C1917] text-right">
+                        {lookupResult.dateOfBirth}
+                      </dd>
+                    </div>
+                  )}
+                  {lookupResult.presentAddress && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-[#78716C] shrink-0">বর্তমান ঠিকানা</dt>
+                      <dd className="text-[#44403C] text-right text-xs">
+                        {lookupResult.presentAddress}
+                      </dd>
+                    </div>
+                  )}
                   <div className="flex justify-between gap-2">
                     <dt className="text-[#78716C]">ভর্তি অবস্থা</dt>
                     <dd
@@ -974,52 +1381,99 @@ export function AdmissionPaymentView() {
                 )}
               </section>
 
-              <section className="lg:col-span-7 bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#F0EBE3]">
-                  <h3 className="text-lg font-bold text-[#1C1917]">
-                    আপনার নির্ধারিত ক্লাস রুটিন ({lookupResult.classLevel} শ্রেণি)
-                  </h3>
-                  <span className="text-xs text-[#78716C]">
-                    মোট {toBengaliDigits(lookupRoutines.length)}টি ক্লাস
-                  </span>
-                </div>
-
-                {lookupRoutines.length === 0 ? (
-                  <p className="text-sm text-[#57534E] py-6 text-center">
-                    এই শ্রেণি ও বিভাগের রুটিন শীঘ্রই প্রধান শিক্ষক কর্তৃক যুক্ত করা হবে।
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-sm">
-                      <thead>
-                        <tr className="border-b border-[#E7E2DA] text-xs font-semibold text-[#78716C]">
-                          <th className="py-2.5 pr-3">বার</th>
-                          <th className="py-2.5 px-3">সময়</th>
-                          <th className="py-2.5 px-3">বিষয় ও শিক্ষক</th>
-                          <th className="py-2.5 pl-3 text-right">কক্ষ</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#F0EBE3]">
-                        {lookupRoutines.map((r) => (
-                          <tr key={r.id}>
-                            <td className="py-3 pr-3 font-semibold text-[#7A0D14] whitespace-nowrap">
-                              {r.day}
-                            </td>
-                            <td className="py-3 px-3 whitespace-nowrap tabular-nums">{r.timeSlot}</td>
-                            <td className="py-3 px-3">
-                              <p className="font-semibold text-[#1C1917]">{r.subject}</p>
-                              <p className="text-xs text-[#78716C]">{r.teacherName}</p>
-                            </td>
-                            <td className="py-3 pl-3 text-right font-mono-tabular text-[#57534E] whitespace-nowrap">
-                              {r.room}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              <div className="lg:col-span-7 space-y-6">
+                {/* Student Published Results */}
+                {lookupResults.length > 0 && (
+                  <section className="bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-[#F0EBE3]">
+                      <h3 className="text-lg font-bold text-[#1C1917] flex items-center gap-2">
+                        <Award className="w-5 h-5 text-[#7A0D14]" />
+                        <span>প্রকাশিত পরীক্ষার ফলাফল</span>
+                      </h3>
+                      <span className="text-xs text-[#78716C]">
+                        মোট {toBengaliDigits(lookupResults.length)}টি ফলাফল
+                      </span>
+                    </div>
+                    <div className="divide-y divide-[#F0EBE3]">
+                      {lookupResults.map((res) => (
+                        <div
+                          key={res.id}
+                          className="py-3 flex flex-wrap items-center justify-between gap-3 text-sm"
+                        >
+                          <div>
+                            <p className="font-semibold text-[#1C1917]">{res.examName}</p>
+                            <p className="text-xs text-[#78716C]">
+                              {res.subject} · {res.publishedDate}
+                            </p>
+                          </div>
+                          <div className="text-right tabular-nums">
+                            <p className="font-bold text-[#1C1917]">
+                              {toBengaliDigits(res.obtainedMarks)} / {toBengaliDigits(res.fullMarks)}
+                            </p>
+                            <p
+                              className={`text-xs font-bold ${
+                                res.grade === 'F' ? 'text-[#B91C1C]' : 'text-[#15803D]'
+                              }`}
+                            >
+                              গ্রেড {res.grade} · GPA {toBengaliDigits(res.gpa.toFixed(2))}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 )}
-              </section>
+
+                {/* Student Class Routine */}
+                <section className="bg-white border border-[#E7E2DA] rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-[#F0EBE3]">
+                    <h3 className="text-lg font-bold text-[#1C1917]">
+                      আপনার নির্ধারিত ক্লাস রুটিন ({lookupResult.classLevel} শ্রেণি)
+                    </h3>
+                    <span className="text-xs text-[#78716C]">
+                      মোট {toBengaliDigits(lookupRoutines.length)}টি ক্লাস
+                    </span>
+                  </div>
+
+                  {lookupRoutines.length === 0 ? (
+                    <p className="text-sm text-[#57534E] py-6 text-center">
+                      এই শ্রেণি ও বিভাগের রুটিন শীঘ্রই প্রধান শিক্ষক কর্তৃক যুক্ত করা হবে।
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-[#E7E2DA] text-xs font-semibold text-[#78716C]">
+                            <th className="py-2.5 pr-3">বার</th>
+                            <th className="py-2.5 px-3">সময়</th>
+                            <th className="py-2.5 px-3">বিষয় ও শিক্ষক</th>
+                            <th className="py-2.5 pl-3 text-right">কক্ষ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#F0EBE3]">
+                          {lookupRoutines.map((r) => (
+                            <tr key={r.id}>
+                              <td className="py-3 pr-3 font-semibold text-[#7A0D14] whitespace-nowrap">
+                                {r.day}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap tabular-nums">
+                                {r.timeSlot}
+                              </td>
+                              <td className="py-3 px-3">
+                                <p className="font-semibold text-[#1C1917]">{r.subject}</p>
+                                <p className="text-xs text-[#78716C]">{r.teacherName}</p>
+                              </td>
+                              <td className="py-3 pl-3 text-right font-mono-tabular text-[#57534E] whitespace-nowrap">
+                                {r.room}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </div>
             </div>
           )}
         </div>

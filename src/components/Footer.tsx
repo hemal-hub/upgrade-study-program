@@ -1,36 +1,38 @@
 import { MapPin, Phone, Mail } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { DEFAULT_LOGO_URL } from '../data/seedData';
+import type { AppView } from '../types';
 
 export function Footer() {
-  const { setActiveView } = useApp();
+  const { setActiveView, siteSettings } = useApp();
+  const isDefaultLogo = siteSettings.logoUrl === DEFAULT_LOGO_URL;
 
-  const goTo = (view: 'home' | 'classes' | 'notices' | 'admission' | 'dashboard') => {
+  const goTo = (view: AppView) => {
     setActiveView(view);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
-    <footer className="bg-white border-t border-[#E7E2DA] mt-auto">
+    <footer className="bg-white border-t border-[#E7E2DA] mt-auto no-print">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 pb-8 border-b border-[#F0EBE3]">
           <div className="md:col-span-5 space-y-3">
             <div className="flex items-center gap-3">
               <span className="w-12 h-12 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
                 <img
-                  src="/assets/aistudio/image_563094c6.svg"
-                  alt="আপগ্রেড স্টাডি প্রোগ্রাম লোগো"
-                  className="w-12 h-12 object-contain scale-[1.55]"
+                  src={siteSettings.logoUrl || DEFAULT_LOGO_URL}
+                  alt={`${siteSettings.siteName} লোগো`}
+                  className={`w-12 h-12 object-contain ${isDefaultLogo ? 'scale-[1.55]' : ''}`}
                   referrerPolicy="no-referrer"
                 />
               </span>
               <div>
-                <p className="text-lg font-bold text-[#7A0D14]">আপগ্রেড স্টাডি প্রোগ্রাম (USP)</p>
-                <p className="text-xs text-[#78716C]">ক্লাস ৬ষ্ঠ – একাদশ শ্রেণির একাডেমিক কেয়ার</p>
+                <p className="text-lg font-bold text-[#7A0D14]">{siteSettings.siteName}</p>
+                <p className="text-xs text-[#78716C]">{siteSettings.siteTagline}</p>
               </div>
             </div>
             <p className="text-sm text-[#57534E] leading-relaxed max-w-md">
-              সুশৃঙ্খল পাঠদান, সাপ্তাহিক মূল্যায়ন পরীক্ষা এবং আধুনিক অনলাইন ভর্তি ও ব্যবস্থাপনা
-              সুবিধাসহ শিক্ষার্থীদের উজ্জ্বল ভবিষ্যৎ গঠনে প্রতিশ্রুতিবদ্ধ।
+              {siteSettings.footerDescription}
             </p>
           </div>
 
@@ -53,6 +55,15 @@ export function Footer() {
                   className="hover:text-[#7A0D14] transition-colors cursor-pointer"
                 >
                   অফিসিয়াল নোটিশ বোর্ড
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => goTo('results')}
+                  className="hover:text-[#7A0D14] transition-colors cursor-pointer"
+                >
+                  পরীক্ষার রেজাল্ট ও মেধাতালিকা
                 </button>
               </li>
               <li>
@@ -81,22 +92,22 @@ export function Footer() {
             <ul className="space-y-2.5 text-sm text-[#57534E]">
               <li className="flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 text-[#7A0D14] mt-0.5 shrink-0" />
-                <span>বাড়ি ১৪, রোড ০৩, একাডেমিক রোড, ঢাকা-১২০৫</span>
+                <span>{siteSettings.contactAddress}</span>
               </li>
               <li className="flex items-center gap-2.5">
                 <Phone className="w-4 h-4 text-[#7A0D14] shrink-0" />
-                <span className="font-mono-tabular">01700-000000 (সকাল ৮টা – রাত ৮টা)</span>
+                <span className="font-mono-tabular">{siteSettings.contactPhone}</span>
               </li>
               <li className="flex items-center gap-2.5">
                 <Mail className="w-4 h-4 text-[#7A0D14] shrink-0" />
-                <span>admission@usp-academy.edu.bd</span>
+                <span>{siteSettings.contactEmail}</span>
               </li>
             </ul>
           </div>
         </div>
 
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#78716C]">
-          <p>© ২০২৬ আপগ্রেড স্টাডি প্রোগ্রাম (USP)। সর্বস্বত্ব সংরক্ষিত।</p>
+          <p>{siteSettings.copyrightText}</p>
           <p>৬ষ্ঠ – একাদশ শ্রেণির অনলাইন ভর্তি ও একাডেমিক ব্যবস্থাপনা সিস্টেম</p>
         </div>
       </div>

@@ -29,7 +29,59 @@ export type TransactionStatus = 'pending' | 'verified' | 'refunded';
 
 export type UserRole = 'student' | 'teacher' | 'principal';
 
-export type AppView = 'home' | 'classes' | 'notices' | 'admission' | 'dashboard';
+export type AppView = 'home' | 'classes' | 'notices' | 'results' | 'admission' | 'dashboard';
+
+export type GradeLetter = 'A+' | 'A' | 'A-' | 'B' | 'C' | 'D' | 'F';
+
+export interface SectionVisibility {
+  heroBanner: boolean;
+  programs: boolean;
+  noticesAndRoutine: boolean;
+  resultsSpotlight: boolean;
+  features: boolean;
+  faculty: boolean;
+  customSections: boolean;
+}
+
+export interface ProofItem {
+  value: string;
+  label: string;
+}
+
+export type CustomSectionCtaTarget = 'none' | 'admission' | 'classes' | 'notices' | 'results';
+
+export interface CustomSection {
+  id: string;
+  title: string;
+  subtitle: string;
+  body: string;
+  imageUrl: string;
+  ctaLabel: string;
+  ctaTarget: CustomSectionCtaTarget;
+  visible: boolean;
+}
+
+export interface SiteSettings {
+  siteName: string;
+  siteTagline: string;
+  logoUrl: string;
+  bannerUrl: string;
+  heroKicker: string;
+  heroTitle: string;
+  heroSubtitle: string;
+  primaryCtaText: string;
+  secondaryCtaText: string;
+  proofItems: ProofItem[];
+  footerDescription: string;
+  contactAddress: string;
+  contactPhone: string;
+  contactEmail: string;
+  copyrightText: string;
+  sectionVisibility: SectionVisibility;
+  customSections: CustomSection[];
+  updatedBy?: string;
+  updatedAt?: string;
+}
 
 export interface ClassProgram {
   classLevel: ClassLevel;
@@ -77,8 +129,15 @@ export interface AdmissionRecord {
   ownerId: string;
   rollNumber: string;
   studentName: string;
+  fatherName: string;
+  motherName: string;
   guardianName: string;
   guardianPhone: string;
+  studentPhone: string;
+  dateOfBirth: string;
+  presentAddress: string;
+  permanentAddress: string;
+  studentPhoto: string;
   schoolName: string;
   classLevel: ClassLevel;
   group: AcademicGroup;
@@ -89,6 +148,32 @@ export interface AdmissionRecord {
   paymentStatus: PaymentStatus;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface StudentResult {
+  id: string;
+  admissionId: string;
+  studentName: string;
+  rollNumber: string;
+  studentPhoto: string;
+  classLevel: ClassLevel;
+  group: AcademicGroup;
+  examName: string;
+  subject: string;
+  fullMarks: number;
+  obtainedMarks: number;
+  gpa: number;
+  grade: GradeLetter;
+  remarks: string;
+  publishedDate: string;
+  authorId: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RankedStudentResult extends StudentResult {
+  meritPosition: number;
+  percentage: number;
 }
 
 export interface PaymentRecord {
@@ -133,8 +218,15 @@ export interface StaffFormInput {
 
 export interface AdmissionFormInput {
   studentName: string;
+  fatherName: string;
+  motherName: string;
   guardianName: string;
   guardianPhone: string;
+  studentPhone: string;
+  dateOfBirth: string;
+  presentAddress: string;
+  permanentAddress: string;
+  studentPhoto: string;
   schoolName: string;
   classLevel: ClassLevel;
   group: AcademicGroup;
@@ -163,6 +255,20 @@ export interface RoutineFormInput {
   subject: string;
   teacherName: string;
   room: string;
+}
+
+export interface ResultFormInput {
+  admissionId: string;
+  studentName: string;
+  rollNumber: string;
+  studentPhoto: string;
+  classLevel: ClassLevel;
+  group: AcademicGroup;
+  examName: string;
+  subject: string;
+  fullMarks: number;
+  obtainedMarks: number;
+  remarks: string;
 }
 
 export interface ValidationResult {

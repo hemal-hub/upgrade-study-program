@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  calculateBangladeshiGrade,
   calculateFeeBreakdown,
+  canAccessDashboard,
+  canManageStaff,
   computeDashboardMetrics,
   filterAndSortNotices,
   filterAndSortRoutines,
@@ -9,14 +12,21 @@ import {
   formatBdt,
   generateRollNumber,
   getAllowedGroupsForClass,
+  groupStudentsByClass,
+  rankResultsWithMerit,
   ROLL_NUMBER_REGEX,
   toBengaliDigits,
   validateAdmissionInput,
+  validateCustomSectionInput,
   validateNoticeInput,
   validatePaymentInput,
+  validateResultInput,
   validateRoutineInput,
+  validateSiteSettingsInput,
+  validateStaffInput,
 } from './academicLogic';
-import type { AdmissionRecord, NoticeItem, PaymentRecord, RoutineEntry } from '../types';
+import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
+import type { AdmissionRecord, NoticeItem, PaymentRecord, RoutineEntry, StudentResult } from '../types';
 
 test('fee breakdown calculates base fees and adds science lab fee for class 9-11 science', () => {
   const class6 = calculateFeeBreakdown('৬ষ্ঠ', 'সাধারণ');
@@ -40,27 +50,48 @@ test('Bengali numeral and BDT currency formatting work accurately', () => {
   assert.equal(formatBdt(5700), '৳৫,৭০০');
 });
 
-test('admission validation rejects empty or malformed inputs and accepts valid data', () => {
+test('admission validation enforces photo, parents, DOB, phone, and addresses', () => {
   const invalid = validateAdmissionInput({
     studentName: '',
+    fatherName: 'ক',
+    motherName: '',
     guardianName: 'ক',
     guardianPhone: '12345',
+    studentPhone: '999',
+    dateOfBirth: '',
+    presentAddress: '',
+    permanentAddress: 'a',
+    studentPhoto: '',
     schoolName: '',
     classLevel: '৬ষ্ঠ',
     group: 'বিজ্ঞান',
     batchShift: 'বিকাল (৩:০০ - ৬:০০)',
   });
   assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.studentPhoto);
   assert.ok(invalid.errors.studentName);
+  assert.ok(invalid.errors.fatherName);
+  assert.ok(invalid.errors.motherName);
   assert.ok(invalid.errors.guardianName);
   assert.ok(invalid.errors.guardianPhone);
+  assert.ok(invalid.errors.studentPhone);
+  assert.ok(invalid.errors.dateOfBirth);
+  assert.ok(invalid.errors.presentAddress);
+  assert.ok(invalid.errors.permanentAddress);
   assert.ok(invalid.errors.schoolName);
   assert.ok(invalid.errors.group);
 
   const valid = validateAdmissionInput({
     studentName: 'তানভীর আহমেদ',
+    fatherName: 'মোঃ রফিকুল ইসলাম',
+    motherName: 'সালমা বেগম',
     guardianName: 'মোঃ রফিকুল ইসলাম',
     guardianPhone: '01712345678',
+    studentPhone: '01812345678',
+    dateOfBirth: '2011-05-12',
+    presentAddress: 'বাড়ি ১২, ধানমন্ডি, ঢাকা',
+    permanentAddress: 'গ্রাম: সোনারগাঁও, নারায়ণগঞ্জ',
+    studentPhoto: 'data:image/jpeg;base64,abc1234567890',
     schoolName: 'ঢাকা রেসিডেনসিয়াল মডেল কলেজ',
     classLevel: '৯ম',
     group: 'বিজ্ঞান',
@@ -111,6 +142,115 @@ test('notice and routine validators catch short/empty fields', () => {
     }).valid,
     false,
   );
+});
+
+test('Bangladeshi GPA grading, result validation, and merit ranking work accurately', () => {
+  assert.deepEqual(calculateBangladeshiGrade(85, 100), {
+    gpa: 5.0,
+    grade: 'A+',
+    percentage: 85,
+    passed: true,
+  });
+  assert.deepEqual(calculateBangladeshiGrade(72, 100), {
+    gpa: 4.0,
+    grade: 'A',
+    percentage: 72,
+    passed: true,
+  });
+  assert.deepEqual(calculateBangladeshiGrade(32, 100), {
+    gpa: 0.0,
+    grade: 'F',
+    percentage: 32,
+    passed: false,
+  });
+
+  const badResult = validateResultInput({
+    admissionId: 'adm-1',
+    studentName: 'রাহাত',
+    rollNumber: 'USP-09-2026-0001',
+    studentPhoto: '',
+    classLevel: '৯ম',
+    group: 'বিজ্ঞান',
+    examName: '',
+    subject: 'গণিত',
+    fullMarks: 100,
+    obtainedMarks: 120,
+    remarks: '',
+  });
+  assert.equal(badResult.valid, false);
+  assert.ok(badResult.errors.examName);
+  assert.ok(badResult.errors.obtainedMarks);
+
+  const results: StudentResult[] = [
+    {
+      id: 'res-1',
+      admissionId: 'a1',
+      studentName: 'শিক্ষার্থী ১',
+      rollNumber: 'USP-09-2026-0001',
+      studentPhoto: '',
+      classLevel: '৯ম',
+      group: 'বিজ্ঞান',
+      examName: 'মডেল টেস্ট ১',
+      subject: 'গণিত',
+      fullMarks: 100,
+      obtainedMarks: 74,
+      gpa: 4.0,
+      grade: 'A',
+      remarks: '',
+      publishedDate: '২৫ নভেম্বর ২০২৬',
+      authorId: 'p1',
+    },
+    {
+      id: 'res-2',
+      admissionId: 'a2',
+      studentName: 'শিক্ষার্থী ২',
+      rollNumber: 'USP-09-2026-0002',
+      studentPhoto: '',
+      classLevel: '৯ম',
+      group: 'বিজ্ঞান',
+      examName: 'মডেল টেস্ট ১',
+      subject: 'গণিত',
+      fullMarks: 100,
+      obtainedMarks: 91,
+      gpa: 5.0,
+      grade: 'A+',
+      remarks: 'অসাধারণ',
+      publishedDate: '২৫ নভেম্বর ২০২৬',
+      authorId: 'p1',
+    },
+  ];
+  const ranked = rankResultsWithMerit(results);
+  assert.equal(ranked[0].id, 'res-2');
+  assert.equal(ranked[0].meritPosition, 1);
+  assert.equal(ranked[1].meritPosition, 2);
+});
+
+test('CMS custom section and site settings validation catch invalid payloads', () => {
+  assert.equal(
+    validateCustomSectionInput({
+      title: '',
+      subtitle: '',
+      body: 'abc',
+      imageUrl: '',
+      ctaLabel: '',
+      ctaTarget: 'none',
+      visible: true,
+    }).valid,
+    false,
+  );
+  assert.equal(
+    validateCustomSectionInput({
+      title: 'বিশেষ স্কলারশিপ প্রোগ্রাম',
+      subtitle: 'মেধাবীদের জন্য',
+      body: 'মডেল টেস্টে শীর্ষ ৫ জন শিক্ষার্থী পাবে ৫০% পর্যন্ত বৃত্তি।',
+      imageUrl: '',
+      ctaLabel: 'আবেদন করুন',
+      ctaTarget: 'admission',
+      visible: true,
+    }).valid,
+    true,
+  );
+  assert.equal(validateSiteSettingsInput(DEFAULT_SITE_SETTINGS).valid, true);
 });
 
 test('routine filtering sorts chronologically by weekday and filters by class', () => {
@@ -190,15 +330,22 @@ test('notice filtering prioritizes pinned notices and matches search', () => {
   assert.equal(searched[0].id, 'n2');
 });
 
-test('student lookup and dashboard metrics aggregate accurately', () => {
+test('student lookup, class grouping, and dashboard metrics aggregate accurately', () => {
   const admissions: AdmissionRecord[] = [
     {
       id: 'a1',
       ownerId: 'u1',
       rollNumber: 'USP-09-2026-0001',
       studentName: 'আরিফুল ইসলাম',
+      fatherName: 'আব্দুল করিম',
+      motherName: 'রাহেলা বেগম',
       guardianName: 'আব্দুল করিম',
       guardianPhone: '01711223344',
+      studentPhone: '01711223300',
+      dateOfBirth: '2011-01-10',
+      presentAddress: 'ঢাকা',
+      permanentAddress: 'কুমিল্লা',
+      studentPhoto: 'data:image/jpeg;base64,abc',
       schoolName: 'আইডিয়াল স্কুল',
       classLevel: '৯ম',
       group: 'বিজ্ঞান',
@@ -213,8 +360,15 @@ test('student lookup and dashboard metrics aggregate accurately', () => {
       ownerId: 'u2',
       rollNumber: 'USP-11-2026-0002',
       studentName: 'নুসরাত জাহান',
+      fatherName: 'মাহমুদুল হক',
+      motherName: 'নাসরিন বেগম',
       guardianName: 'মাহমুদুল হক',
       guardianPhone: '01911223355',
+      studentPhone: '',
+      dateOfBirth: '2009-04-02',
+      presentAddress: 'ঢাকা',
+      permanentAddress: 'ঢাকা',
+      studentPhoto: 'data:image/jpeg;base64,xyz',
       schoolName: 'ভিকারুননিসা নূন কলেজ',
       classLevel: 'একাদশ',
       group: 'বিজ্ঞান',
@@ -256,8 +410,14 @@ test('student lookup and dashboard metrics aggregate accurately', () => {
   ];
 
   assert.equal(findStudentAdmission(admissions, '01911223355')?.id, 'a2');
+  assert.equal(findStudentAdmission(admissions, '01711223300')?.id, 'a1');
   assert.equal(findStudentAdmission(admissions, 'usp-09-2026-0001')?.id, 'a1');
   assert.deepEqual(getAllowedGroupsForClass('৮ম'), ['সাধারণ']);
+
+  const grouped = groupStudentsByClass(admissions);
+  assert.equal(grouped['৯ম'].length, 1);
+  assert.equal(grouped['একাদশ'].length, 1);
+  assert.equal(grouped['৬ষ্ঠ'].length, 0);
 
   const metrics = computeDashboardMetrics(admissions, payments, [], []);
   assert.equal(metrics.totalStudents, 2);
@@ -267,9 +427,7 @@ test('student lookup and dashboard metrics aggregate accurately', () => {
   assert.equal(metrics.pendingRevenue, 7700);
 });
 
-test('RBAC helpers strictly deny logged-out, unverified, and student users from dashboard actions', async () => {
-  const { canAccessDashboard, canManageStaff, validateStaffInput } = await import('./academicLogic');
-
+test('RBAC helpers strictly deny logged-out, unverified, and student users from dashboard actions', () => {
   assert.equal(canAccessDashboard(false, false, 'principal'), false);
   assert.equal(canAccessDashboard(true, false, 'principal'), false);
   assert.equal(canAccessDashboard(true, true, 'student'), false);
@@ -293,4 +451,3 @@ test('RBAC helpers strictly deny logged-out, unverified, and student users from 
     true,
   );
 });
-

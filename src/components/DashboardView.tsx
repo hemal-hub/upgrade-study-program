@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import {
+  Award,
   Bell,
   Calendar,
   Check,
   Copy,
   CreditCard,
+  GraduationCap,
   LayoutDashboard,
   Lock,
   LogIn,
@@ -12,12 +14,17 @@ import {
   Plus,
   Search,
   ShieldAlert,
+  Sliders,
   Trash2,
   UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { AdminCmsTab } from './admin/AdminCmsTab';
+import { AdminResultsTab } from './admin/AdminResultsTab';
+import { AdminStudentListTab } from './admin/AdminStudentListTab';
+import { createStudentAvatarSvg } from '../utils/imageUtils';
 import type {
   AcademicGroup,
   ClassLevel,
@@ -44,14 +51,26 @@ import {
   validateStaffInput,
 } from '../utils/academicLogic';
 
-type DashboardTab = 'overview' | 'students' | 'payments' | 'routines' | 'notices' | 'staff';
+type DashboardTab =
+  | 'overview'
+  | 'studentList'
+  | 'students'
+  | 'payments'
+  | 'results'
+  | 'routines'
+  | 'notices'
+  | 'cms'
+  | 'staff';
 
 const BASE_SIDEBAR_ITEMS: Array<{ id: DashboardTab; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'সংক্ষিপ্ত চিত্র', icon: LayoutDashboard },
-  { id: 'students', label: 'শিক্ষার্থী ও ভর্তি', icon: Users },
+  { id: 'studentList', label: 'Student List', icon: GraduationCap },
+  { id: 'students', label: 'ভর্তি অনুমোদন', icon: Users },
   { id: 'payments', label: 'পেমেন্ট লেজার', icon: CreditCard },
+  { id: 'results', label: 'রেজাল্ট প্রকাশ', icon: Award },
   { id: 'routines', label: 'রুটিন প্রকাশ', icon: Calendar },
   { id: 'notices', label: 'নোটিশ প্রকাশ', icon: Bell },
+  { id: 'cms', label: 'ওয়েবসাইট কনটেন্ট (CMS)', icon: Sliders },
 ];
 
 export function DashboardView() {
@@ -264,9 +283,9 @@ export function DashboardView() {
 
           <div className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-4 text-left text-xs text-[#57534E] space-y-1.5">
             <p className="font-semibold text-[#1C1917]">লগইন করলে যে সুবিধাগুলো আনলক হবে:</p>
-            <p>• শিক্ষার্থী অনুমোদন, বাতিল ও ব্যাচ তালিকা পরিচালনা</p>
-            <p>• বিকাশ/নগদ/রকেট/কার্ড পেমেন্ট যাচাই ও আয়-হিসাব লেজার</p>
-            <p>• প্রধান শিক্ষক কর্তৃক রুটিন ও নোটিশ প্রকাশ এবং শিক্ষক যুক্ত করা</p>
+            <p>• Student List (শ্রেণিভিত্তিক ছবিসহ পূর্ণাঙ্গ তথ্য), ভর্তি অনুমোদন ও পেমেন্ট লেজার</p>
+            <p>• শ্রেণিভিত্তিক পরীক্ষার রেজাল্ট, ক্লাস রুটিন ও নোটিশ প্রকাশ</p>
+            <p>• ওয়েবসাইটের লোগো, ব্যানার, লেখা পরিবর্তন, নতুন সেকশন যুক্ত ও হাইড করার সুবিধা</p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2">
@@ -497,30 +516,46 @@ export function DashboardView() {
               </section>
 
               {/* Quick Principal Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('routines')}
+                  onClick={() => setActiveTab('studentList')}
                   className="bg-white border border-[#E7E2DA] rounded-xl p-5 text-left hover:border-[#7A0D14] transition-colors cursor-pointer"
                 >
-                  <p className="text-sm font-bold text-[#7A0D14]">নতুন ক্লাস রুটিন প্রকাশ করুন</p>
+                  <p className="text-sm font-bold text-[#7A0D14]">Student List দেখুন</p>
                   <p className="text-xs text-[#57534E] mt-1">
-                    ৬ষ্ঠ থেকে একাদশ শ্রেণির নতুন ক্লাস সময়সূচি ও শিক্ষকের নাম যুক্ত করুন।
+                    শ্রেণিভিত্তিক সকল শিক্ষার্থীর ছবি, পিতা-মাতা, জন্ম তারিখ ও ঠিকানা দেখুন।
                   </p>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('notices')}
+                  onClick={() => setActiveTab('results')}
                   className="bg-white border border-[#E7E2DA] rounded-xl p-5 text-left hover:border-[#7A0D14] transition-colors cursor-pointer"
                 >
-                  <p className="text-sm font-bold text-[#7A0D14]">নতুন নোটিশ প্রকাশ করুন</p>
+                  <p className="text-sm font-bold text-[#7A0D14]">শ্রেণিভিত্তিক রেজাল্ট প্রকাশ</p>
                   <p className="text-xs text-[#57534E] mt-1">
-                    পরীক্ষা, ছুটি বা ভর্তির জরুরি ঘোষণা সরাসরি নোটিশ বোর্ডে পোস্ট করুন।
+                    শ্রেণি নির্বাচন করে ছবিসহ সকল শিক্ষার্থীর পরীক্ষার নম্বর ও গ্রেড প্রকাশ করুন।
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('cms')}
+                  className="bg-white border border-[#E7E2DA] rounded-xl p-5 text-left hover:border-[#7A0D14] transition-colors cursor-pointer"
+                >
+                  <p className="text-sm font-bold text-[#7A0D14]">ওয়েবসাইট কনটেন্ট (CMS)</p>
+                  <p className="text-xs text-[#57534E] mt-1">
+                    লোগো, ব্যানার, লেখা পরিবর্তন করুন এবং নতুন সেকশন যুক্ত বা হাইড করুন।
                   </p>
                 </button>
               </div>
             </div>
           )}
+
+          {activeTab === 'studentList' && <AdminStudentListTab />}
+
+          {activeTab === 'results' && <AdminResultsTab />}
+
+          {activeTab === 'cms' && <AdminCmsTab />}
 
           {activeTab === 'students' && (
             <section className="bg-white border border-[#E7E2DA] rounded-2xl overflow-hidden">
@@ -572,11 +607,22 @@ export function DashboardView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#F0EBE3]">
-                    {filteredStudents.map((adm) => (
+                    {filteredStudents.map((adm, idx) => (
                       <tr key={adm.id} className="hover:bg-[#FAF8F5]">
                         <td className="py-3 px-4">
-                          <p className="font-semibold text-[#1C1917]">{adm.studentName}</p>
-                          <p className="text-xs font-mono-tabular text-[#78716C]">{adm.rollNumber}</p>
+                          <div className="flex items-center gap-2.5">
+                            <img
+                              src={adm.studentPhoto || createStudentAvatarSvg(adm.studentName, idx)}
+                              alt={adm.studentName}
+                              className="w-9 h-9 rounded-lg object-cover border border-[#E7E2DA] shrink-0"
+                            />
+                            <div>
+                              <p className="font-semibold text-[#1C1917]">{adm.studentName}</p>
+                              <p className="text-xs font-mono-tabular text-[#78716C]">
+                                {adm.rollNumber}
+                              </p>
+                            </div>
+                          </div>
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
                           <p className="font-medium text-[#1C1917]">
@@ -1119,40 +1165,46 @@ export function DashboardView() {
                     প্রকাশিত নোটিশসমূহ ({toBengaliDigits(sortedNotices.length)})
                   </h3>
                 </div>
-                <div className="divide-y divide-[#F0EBE3]">
-                  {sortedNotices.map((nt) => (
-                    <div
-                      key={nt.id}
-                      className="p-5 flex items-start justify-between gap-4 hover:bg-[#FAF8F5]"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-x-2 text-xs text-[#78716C]">
-                          <span className="font-semibold text-[#7A0D14]">{nt.category}</span>
-                          <span aria-hidden="true">·</span>
-                          <span>{nt.targetClass}</span>
-                          <span aria-hidden="true">·</span>
-                          <span>{nt.publishedDate}</span>
-                          {nt.pinned && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-semibold text-[#B8862B]">পিন করা</span>
-                            </>
-                          )}
-                        </div>
-                        <p className="font-semibold text-[#1C1917]">{nt.title}</p>
-                        <p className="text-xs text-[#57534E] line-clamp-2">{nt.body}</p>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={`${nt.title} নোটিশ মুছুন`}
-                        onClick={() => void removeNotice(nt.id)}
-                        className="p-2 text-[#78716C] hover:text-[#B91C1C] transition-colors shrink-0 cursor-pointer"
+                {sortedNotices.length === 0 ? (
+                  <div className="p-8 text-center text-sm font-medium text-[#57534E]">
+                    এখনো কোন নোটিশ পাবলিশ হয়নি
+                  </div>
+                ) : (
+                  <div className="divide-y divide-[#F0EBE3]">
+                    {sortedNotices.map((nt) => (
+                      <div
+                        key={nt.id}
+                        className="p-5 flex items-start justify-between gap-4 hover:bg-[#FAF8F5]"
                       >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-x-2 text-xs text-[#78716C]">
+                            <span className="font-semibold text-[#7A0D14]">{nt.category}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{nt.targetClass}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{nt.publishedDate}</span>
+                            {nt.pinned && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="font-semibold text-[#B8862B]">পিন করা</span>
+                              </>
+                            )}
+                          </div>
+                          <p className="font-semibold text-[#1C1917]">{nt.title}</p>
+                          <p className="text-xs text-[#57534E] line-clamp-2">{nt.body}</p>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={`${nt.title} নোটিশ মুছুন`}
+                          onClick={() => void removeNotice(nt.id)}
+                          className="p-2 text-[#78716C] hover:text-[#B91C1C] transition-colors shrink-0 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             </div>
           )}

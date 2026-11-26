@@ -23,14 +23,20 @@ import {
 import type {
   AdmissionRecord,
   AdmissionStatus,
+  CustomSection,
   NoticeItem,
   PaymentRecord,
   PaymentStatus,
+  ProofItem,
   RoutineEntry,
+  SiteSettings,
+  StudentResult,
   TransactionStatus,
   UserRole,
 } from '../types';
+import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
 import { sanitizeText } from '../utils/academicLogic';
+import { createStudentAvatarSvg } from '../utils/imageUtils';
 
 function formatTimestamp(val: unknown): string {
   if (val instanceof Timestamp) {
@@ -85,6 +91,145 @@ export async function ensureUserProfile(user: User): Promise<UserRole> {
   }
 
   return 'student';
+}
+
+export function subscribePublicSiteSettings(
+  onData: (settings: SiteSettings) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = 'site_settings/main';
+  return onSnapshot(
+    doc(db, 'site_settings', 'main'),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(DEFAULT_SITE_SETTINGS);
+        return;
+      }
+      const data = snap.data();
+      const vis = (data.sectionVisibility ?? {}) as Partial<SiteSettings['sectionVisibility']>;
+      const rawProof = Array.isArray(data.proofItems) ? data.proofItems : [];
+      const proofItems: ProofItem[] =
+        rawProof.length > 0
+          ? rawProof.slice(0, 4).map((p: Record<string, unknown>) => ({
+              value: String(p?.value ?? ''),
+              label: String(p?.label ?? ''),
+            }))
+          : DEFAULT_SITE_SETTINGS.proofItems;
+
+      const rawCustom = Array.isArray(data.customSections) ? data.customSections : [];
+      const customSections: CustomSection[] = rawCustom
+        .slice(0, 12)
+        .map((s: Record<string, unknown>, idx: number) => ({
+          id: String(s?.id ?? `sec_${idx}`),
+          title: String(s?.title ?? ''),
+          subtitle: String(s?.subtitle ?? ''),
+          body: String(s?.body ?? ''),
+          imageUrl: String(s?.imageUrl ?? ''),
+          ctaLabel: String(s?.ctaLabel ?? ''),
+          ctaTarget:
+            s?.ctaTarget === 'admission' ||
+            s?.ctaTarget === 'classes' ||
+            s?.ctaTarget === 'notices' ||
+            s?.ctaTarget === 'results'
+              ? s.ctaTarget
+              : 'none',
+          visible: s?.visible !== false,
+        }));
+
+      onData({
+        siteName: String(data.siteName || DEFAULT_SITE_SETTINGS.siteName),
+        siteTagline: String(data.siteTagline || DEFAULT_SITE_SETTINGS.siteTagline),
+        logoUrl: String(data.logoUrl || DEFAULT_SITE_SETTINGS.logoUrl),
+        bannerUrl: String(data.bannerUrl || DEFAULT_SITE_SETTINGS.bannerUrl),
+        heroKicker: String(data.heroKicker || DEFAULT_SITE_SETTINGS.heroKicker),
+        heroTitle: String(data.heroTitle || DEFAULT_SITE_SETTINGS.heroTitle),
+        heroSubtitle: String(data.heroSubtitle || DEFAULT_SITE_SETTINGS.heroSubtitle),
+        primaryCtaText: String(data.primaryCtaText || DEFAULT_SITE_SETTINGS.primaryCtaText),
+        secondaryCtaText: String(data.secondaryCtaText || DEFAULT_SITE_SETTINGS.secondaryCtaText),
+        proofItems,
+        footerDescription: String(
+          data.footerDescription || DEFAULT_SITE_SETTINGS.footerDescription,
+        ),
+        contactAddress: String(data.contactAddress || DEFAULT_SITE_SETTINGS.contactAddress),
+        contactPhone: String(data.contactPhone || DEFAULT_SITE_SETTINGS.contactPhone),
+        contactEmail: String(data.contactEmail || DEFAULT_SITE_SETTINGS.contactEmail),
+        copyrightText: String(data.copyrightText || DEFAULT_SITE_SETTINGS.copyrightText),
+        sectionVisibility: {
+          heroBanner: vis.heroBanner !== false,
+          programs: vis.programs !== false,
+          noticesAndRoutine: vis.noticesAndRoutine !== false,
+          resultsSpotlight: vis.resultsSpotlight !== false,
+          features: vis.features !== false,
+          faculty: vis.faculty !== false,
+          customSections: vis.customSections !== false,
+        },
+        customSections,
+        updatedBy: data.updatedBy ? String(data.updatedBy) : undefined,
+        updatedAt: data.updatedAt ? formatTimestamp(data.updatedAt) : undefined,
+      });
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export async function saveSiteSettingsInFirestore(
+  settings: SiteSettings,
+  updatedByUid: string,
+): Promise<void> {
+  const path = 'site_settings/main';
+  const payload = {
+    siteName: sanitizeText(settings.siteName, 100),
+    siteTagline: sanitizeText(settings.siteTagline, 160),
+    logoUrl: settings.logoUrl.trim().slice(0, 200000),
+    bannerUrl: settings.bannerUrl.trim().slice(0, 300000),
+    heroKicker: sanitizeText(settings.heroKicker, 160),
+    heroTitle: sanitizeText(settings.heroTitle, 220),
+    heroSubtitle: settings.heroSubtitle.trim().slice(0, 500),
+    primaryCtaText: sanitizeText(settings.primaryCtaText, 60),
+    secondaryCtaText: sanitizeText(settings.secondaryCtaText, 60),
+    proofItems: settings.proofItems.slice(0, 4).map((p) => ({
+      value: sanitizeText(p.value, 60),
+      label: sanitizeText(p.label, 120),
+    })),
+    footerDescription: settings.footerDescription.trim().slice(0, 500),
+    contactAddress: sanitizeText(settings.contactAddress, 200),
+    contactPhone: sanitizeText(settings.contactPhone, 80),
+    contactEmail: sanitizeText(settings.contactEmail, 150),
+    copyrightText: sanitizeText(settings.copyrightText, 160),
+    sectionVisibility: {
+      heroBanner: Boolean(settings.sectionVisibility.heroBanner),
+      programs: Boolean(settings.sectionVisibility.programs),
+      noticesAndRoutine: Boolean(settings.sectionVisibility.noticesAndRoutine),
+      resultsSpotlight: Boolean(settings.sectionVisibility.resultsSpotlight),
+      features: Boolean(settings.sectionVisibility.features),
+      faculty: Boolean(settings.sectionVisibility.faculty),
+      customSections: Boolean(settings.sectionVisibility.customSections),
+    },
+    customSections: settings.customSections.slice(0, 12).map((sec) => ({
+      id: sanitizeText(sec.id, 64),
+      title: sanitizeText(sec.title, 120),
+      subtitle: sanitizeText(sec.subtitle, 160),
+      body: sec.body.trim().slice(0, 1200),
+      imageUrl: sec.imageUrl.trim().slice(0, 150000),
+      ctaLabel: sanitizeText(sec.ctaLabel, 50),
+      ctaTarget: sec.ctaTarget,
+      visible: Boolean(sec.visible),
+    })),
+    updatedBy: updatedByUid,
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    await setDoc(doc(db, 'site_settings', 'main'), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
 }
 
 export function subscribePublicNotices(
@@ -157,6 +302,96 @@ export function subscribePublicRoutines(
   );
 }
 
+export function subscribePublicResults(
+  onData: (results: StudentResult[]) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = 'results';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items: StudentResult[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          admissionId: String(data.admissionId ?? ''),
+          studentName: String(data.studentName ?? ''),
+          rollNumber: String(data.rollNumber ?? ''),
+          studentPhoto: String(data.studentPhoto ?? ''),
+          classLevel: data.classLevel,
+          group: data.group,
+          examName: String(data.examName ?? ''),
+          subject: String(data.subject ?? ''),
+          fullMarks: Number(data.fullMarks ?? 100),
+          obtainedMarks: Number(data.obtainedMarks ?? 0),
+          gpa: Number(data.gpa ?? 0),
+          grade: data.grade,
+          remarks: String(data.remarks ?? ''),
+          publishedDate: String(data.publishedDate ?? ''),
+          authorId: String(data.authorId ?? ''),
+          createdAt: formatTimestamp(data.createdAt),
+          updatedAt: formatTimestamp(data.updatedAt),
+        };
+      });
+      onData(items);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export async function publishBatchResultsInFirestore(
+  items: Array<Omit<StudentResult, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<string[]> {
+  const batch = writeBatch(db);
+  const ids: string[] = [];
+
+  for (const res of items) {
+    const resultId = makeDocId('res');
+    ids.push(resultId);
+    batch.set(doc(db, 'results', resultId), {
+      admissionId: res.admissionId,
+      studentName: sanitizeText(res.studentName, 100),
+      rollNumber: res.rollNumber,
+      studentPhoto: (res.studentPhoto ?? '').slice(0, 180000),
+      classLevel: res.classLevel,
+      group: res.group,
+      examName: sanitizeText(res.examName, 120),
+      subject: sanitizeText(res.subject, 100),
+      fullMarks: res.fullMarks,
+      obtainedMarks: res.obtainedMarks,
+      gpa: res.gpa,
+      grade: res.grade,
+      remarks: sanitizeText(res.remarks, 200),
+      publishedDate: sanitizeText(res.publishedDate, 40),
+      authorId: res.authorId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  try {
+    await batch.commit();
+    return ids;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'results');
+  }
+}
+
+export async function deleteResultInFirestore(resultId: string): Promise<void> {
+  const path = `results/${resultId}`;
+  try {
+    await deleteDoc(doc(db, 'results', resultId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 export function subscribeAdmissions(
   user: User,
   isBootstrapPrincipal: boolean,
@@ -172,15 +407,23 @@ export function subscribeAdmissions(
   return onSnapshot(
     q,
     (snapshot) => {
-      const items: AdmissionRecord[] = snapshot.docs.map((d) => {
+      const items: AdmissionRecord[] = snapshot.docs.map((d, idx) => {
         const data = d.data();
+        const studentName = String(data.studentName ?? '');
         return {
           id: d.id,
           ownerId: String(data.ownerId ?? ''),
           rollNumber: String(data.rollNumber ?? ''),
-          studentName: String(data.studentName ?? ''),
+          studentName,
+          fatherName: String(data.fatherName ?? data.guardianName ?? ''),
+          motherName: String(data.motherName ?? ''),
           guardianName: String(data.guardianName ?? ''),
           guardianPhone: String(data.guardianPhone ?? ''),
+          studentPhone: String(data.studentPhone ?? ''),
+          dateOfBirth: String(data.dateOfBirth ?? ''),
+          presentAddress: String(data.presentAddress ?? ''),
+          permanentAddress: String(data.permanentAddress ?? ''),
+          studentPhoto: String(data.studentPhoto || createStudentAvatarSvg(studentName, idx)),
           schoolName: String(data.schoolName ?? ''),
           classLevel: data.classLevel,
           group: data.group,
@@ -265,8 +508,15 @@ export async function createAdmissionAndPaymentInFirestore(
     ownerId: admission.ownerId,
     rollNumber: admission.rollNumber,
     studentName: sanitizeText(admission.studentName, 100),
+    fatherName: sanitizeText(admission.fatherName, 100),
+    motherName: sanitizeText(admission.motherName, 100),
     guardianName: sanitizeText(admission.guardianName, 100),
     guardianPhone: admission.guardianPhone.trim(),
+    studentPhone: admission.studentPhone.trim().slice(0, 15),
+    dateOfBirth: admission.dateOfBirth.trim(),
+    presentAddress: sanitizeText(admission.presentAddress, 300),
+    permanentAddress: sanitizeText(admission.permanentAddress, 300),
+    studentPhoto: admission.studentPhoto.slice(0, 180000),
     schoolName: sanitizeText(admission.schoolName, 150),
     classLevel: admission.classLevel,
     group: admission.group,
@@ -402,7 +652,15 @@ export async function updatePaymentStatusInFirestore(
 }
 
 export function subscribeStaffMembers(
-  onData: (staff: Array<{ uid: string; name: string; role: 'teacher' | 'principal'; subject: string; createdAt?: string }>) => void,
+  onData: (
+    staff: Array<{
+      uid: string;
+      name: string;
+      role: 'teacher' | 'principal';
+      subject: string;
+      createdAt?: string;
+    }>,
+  ) => void,
   onErr?: (err: Error) => void,
 ): Unsubscribe {
   const path = 'staff';
@@ -460,4 +718,3 @@ export async function removeStaffMemberInFirestore(uid: string): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
-

@@ -11,21 +11,28 @@ import {
   createNoticeInFirestore,
   createRoutineInFirestore,
   deleteNoticeInFirestore,
+  deleteResultInFirestore,
   deleteRoutineInFirestore,
   ensureUserProfile,
+  publishBatchResultsInFirestore,
   removeStaffMemberInFirestore,
+  saveSiteSettingsInFirestore,
   subscribeAdmissions,
   subscribePayments,
   subscribePublicNotices,
+  subscribePublicResults,
   subscribePublicRoutines,
+  subscribePublicSiteSettings,
   subscribeStaffMembers,
   updateAdmissionStatusInFirestore,
   updatePaymentStatusInFirestore,
 } from '../firebase/store';
 import {
+  DEFAULT_SITE_SETTINGS,
   SEED_ADMISSIONS,
   SEED_NOTICES,
   SEED_PAYMENTS,
+  SEED_RESULTS,
   SEED_ROUTINES,
 } from '../data/seedData';
 import type {
@@ -39,14 +46,18 @@ import type {
   PaymentFormInput,
   PaymentRecord,
   PaymentStatus,
+  ResultFormInput,
   RoutineEntry,
   RoutineFormInput,
+  SiteSettings,
   StaffFormInput,
   StaffMember,
+  StudentResult,
   TransactionStatus,
   UserRole,
 } from '../types';
 import {
+  calculateBangladeshiGrade,
   calculateFeeBreakdown,
   canAccessDashboard,
   canManageStaff,
@@ -75,8 +86,11 @@ interface AppContextValue {
   isCloudSynced: boolean;
   signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
+  siteSettings: SiteSettings;
+  updateSiteSettings: (nextSettings: SiteSettings) => Promise<void>;
   notices: NoticeItem[];
   routines: RoutineEntry[];
+  results: StudentResult[];
   admissions: AdmissionRecord[];
   payments: PaymentRecord[];
   staffMembers: StaffMember[];
@@ -88,6 +102,8 @@ interface AppContextValue {
   removeNotice: (id: string) => Promise<void>;
   publishRoutine: (input: RoutineFormInput) => Promise<void>;
   removeRoutine: (id: string) => Promise<void>;
+  publishBatchResults: (inputs: ResultFormInput[]) => Promise<void>;
+  removeResult: (id: string) => Promise<void>;
   updateAdmissionStatus: (
     admissionId: string,
     status: AdmissionStatus,
@@ -133,16 +149,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>('student');
 
+  // Public CMS Site Settings
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
   // Remote Firestore lists
   const [cloudNotices, setCloudNotices] = useState<NoticeItem[]>([]);
   const [cloudRoutines, setCloudRoutines] = useState<RoutineEntry[]>([]);
+  const [cloudResults, setCloudResults] = useState<StudentResult[]>([]);
   const [cloudAdmissions, setCloudAdmissions] = useState<AdmissionRecord[]>([]);
   const [cloudPayments, setCloudPayments] = useState<PaymentRecord[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
 
-  // Local session additions & overrides (used seamlessly alongside seed records when not signed in)
+  // Local lists (Notice & Results intentionally start empty until explicitly published!)
   const [localNotices, setLocalNotices] = useState<NoticeItem[]>(SEED_NOTICES);
   const [localRoutines, setLocalRoutines] = useState<RoutineEntry[]>(SEED_ROUTINES);
+  const [localResults, setLocalResults] = useState<StudentResult[]>(SEED_RESULTS);
   const [localAdmissions, setLocalAdmissions] = useState<AdmissionRecord[]>(SEED_ADMISSIONS);
   const [localPayments, setLocalPayments] = useState<PaymentRecord[]>(SEED_PAYMENTS);
 
@@ -183,23 +204,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, []);
 
-  // Subscribe to public academic collections (notices & routines)
+  // Subscribe to public collections (site settings, notices, routines, results)
   useEffect(() => {
+    const unsubSettings = subscribePublicSiteSettings(
+      (settings) => setSiteSettings(settings),
+      () => {},
+    );
     const unsubNotices = subscribePublicNotices(
       (items) => setCloudNotices(items),
-      () => {
-        // Keep local notices if cloud read is unavailable
-      },
+      () => {},
     );
     const unsubRoutines = subscribePublicRoutines(
       (items) => setCloudRoutines(items),
-      () => {
-        // Keep local routines if cloud read is unavailable
-      },
+      () => {},
+    );
+    const unsubResults = subscribePublicResults(
+      (items) => setCloudResults(items),
+      () => {},
     );
     return () => {
+      unsubSettings();
       unsubNotices();
       unsubRoutines();
+      unsubResults();
     };
   }, []);
 
@@ -241,7 +268,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [authReady, user]);
 
-  // Merge cloud records on top of local/seed records without duplicating IDs
+  // Merge cloud records without duplicating IDs
   const notices = useMemo(() => {
     const map = new Map<string, NoticeItem>();
     for (const item of localNotices) map.set(item.id, item);
@@ -255,6 +282,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const item of cloudRoutines) map.set(item.id, item);
     return Array.from(map.values());
   }, [localRoutines, cloudRoutines]);
+
+  const results = useMemo(() => {
+    const map = new Map<string, StudentResult>();
+    for (const item of localResults) map.set(item.id, item);
+    for (const item of cloudResults) map.set(item.id, item);
+    return Array.from(map.values());
+  }, [localResults, cloudResults]);
 
   const admissions = useMemo(() => {
     const map = new Map<string, AdmissionRecord>();
@@ -315,6 +349,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  const updateSiteSettings = useCallback(
+    async (nextSettings: SiteSettings) => {
+      if (!user || !hasStaffAccess) {
+        showToast('ওয়েবসাইটের তথ্য পরিবর্তনের জন্য প্রধান শিক্ষক বা শিক্ষক লগইন আবশ্যক।', 'error');
+        return;
+      }
+      await saveSiteSettingsInFirestore(nextSettings, user.uid);
+      setSiteSettings(nextSettings);
+      showToast('ওয়েবসাইটের লোগো, ব্যানার, সেকশন ও তথ্য সফলভাবে সংরক্ষিত হয়েছে।', 'success');
+    },
+    [hasStaffAccess, showToast, user],
+  );
+
   const submitAdmissionWithPayment = useCallback(
     async (admissionInput: AdmissionFormInput, paymentInput: PaymentFormInput) => {
       const fees = calculateFeeBreakdown(admissionInput.classLevel, admissionInput.group);
@@ -330,8 +377,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ownerId,
         rollNumber,
         studentName: sanitizeText(admissionInput.studentName, 100),
+        fatherName: sanitizeText(admissionInput.fatherName, 100),
+        motherName: sanitizeText(admissionInput.motherName, 100),
         guardianName: sanitizeText(admissionInput.guardianName, 100),
         guardianPhone: admissionInput.guardianPhone.trim().replace(/[\s-]/g, ''),
+        studentPhone: admissionInput.studentPhone.trim().replace(/[\s-]/g, ''),
+        dateOfBirth: admissionInput.dateOfBirth.trim(),
+        presentAddress: sanitizeText(admissionInput.presentAddress, 300),
+        permanentAddress: sanitizeText(admissionInput.permanentAddress, 300),
+        studentPhoto: admissionInput.studentPhoto,
         schoolName: sanitizeText(admissionInput.schoolName, 150),
         classLevel: admissionInput.classLevel,
         group: admissionInput.group,
@@ -476,6 +530,61 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [cloudRoutines, hasStaffAccess, showToast, user],
   );
 
+  const publishBatchResults = useCallback(
+    async (inputs: ResultFormInput[]) => {
+      if (!user || !hasStaffAccess) {
+        showToast('রেজাল্ট প্রকাশের জন্য প্রধান শিক্ষক বা শিক্ষক লগইন আবশ্যক।', 'error');
+        return;
+      }
+      if (inputs.length === 0) return;
+
+      const publishedDate = formatBengaliToday();
+      const payload = inputs.map((item) => {
+        const computed = calculateBangladeshiGrade(item.obtainedMarks, item.fullMarks);
+        return {
+          admissionId: item.admissionId,
+          studentName: sanitizeText(item.studentName, 100),
+          rollNumber: item.rollNumber,
+          studentPhoto: item.studentPhoto || '',
+          classLevel: item.classLevel,
+          group: item.group,
+          examName: sanitizeText(item.examName, 120),
+          subject: sanitizeText(item.subject, 100),
+          fullMarks: item.fullMarks,
+          obtainedMarks: item.obtainedMarks,
+          gpa: computed.gpa,
+          grade: computed.grade,
+          remarks: sanitizeText(item.remarks, 200),
+          publishedDate,
+          authorId: user.uid,
+        };
+      });
+
+      await publishBatchResultsInFirestore(payload);
+      showToast(
+        `${toBengaliDigits(payload.length)} জন শিক্ষার্থীর রেজাল্ট সফলভাবে প্রকাশ করা হয়েছে।`,
+        'success',
+      );
+    },
+    [hasStaffAccess, showToast, user],
+  );
+
+  const removeResult = useCallback(
+    async (id: string) => {
+      if (!user || !hasStaffAccess) {
+        showToast('রেজাল্ট মোছার জন্য প্রধান শিক্ষক বা শিক্ষক লগইন আবশ্যক।', 'error');
+        return;
+      }
+      const isCloudDoc = cloudResults.some((r) => r.id === id);
+      if (isCloudDoc) {
+        await deleteResultInFirestore(id);
+      }
+      setLocalResults((prev) => prev.filter((r) => r.id !== id));
+      showToast('রেজাল্টটি মুছে ফেলা হয়েছে।', 'info');
+    },
+    [cloudResults, hasStaffAccess, showToast, user],
+  );
+
   const updateAdmissionStatus = useCallback(
     async (admissionId: string, status: AdmissionStatus, paymentStatus?: PaymentStatus) => {
       if (!user || !hasStaffAccess) {
@@ -613,8 +722,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isCloudSynced,
     signInWithGoogle,
     signOutUser,
+    siteSettings,
+    updateSiteSettings,
     notices,
     routines,
+    results,
     admissions,
     payments,
     staffMembers,
@@ -623,6 +735,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     removeNotice,
     publishRoutine,
     removeRoutine,
+    publishBatchResults,
+    removeResult,
     updateAdmissionStatus,
     updatePaymentStatus,
     addStaffMember,

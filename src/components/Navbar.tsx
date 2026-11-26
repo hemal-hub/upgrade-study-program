@@ -2,19 +2,22 @@ import { useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
+import { DEFAULT_LOGO_URL } from '../data/seedData';
 import type { AppView } from '../types';
 
 const NAV_ITEMS: Array<{ id: AppView; label: string }> = [
   { id: 'home', label: 'হোম' },
   { id: 'classes', label: 'ক্লাস ও রুটিন' },
   { id: 'notices', label: 'নোটিশ' },
-  { id: 'admission', label: 'অনলাইন ভর্তি' },
+  { id: 'results', label: 'রেজাল্ট' },
   { id: 'dashboard', label: 'ড্যাশবোর্ড' },
 ];
 
 export function Navbar() {
-  const { activeView, setActiveView } = useApp();
+  const { activeView, setActiveView, siteSettings } = useApp();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const isDefaultLogo = siteSettings.logoUrl === DEFAULT_LOGO_URL;
 
   const handleNavigate = (view: AppView) => {
     setActiveView(view);
@@ -23,7 +26,7 @@ export function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#E7E2DA]">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#E7E2DA] no-print">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
         {/* Zone 1: Brand lockup (single line, no extra descriptors) */}
         <button
@@ -33,18 +36,18 @@ export function Navbar() {
         >
           <span className="w-11 h-11 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
             <img
-              src="/assets/aistudio/image_563094c6.svg"
-              alt="আপগ্রেড স্টাডি প্রোগ্রাম লোগো"
-              className="w-11 h-11 object-contain scale-[1.55]"
+              src={siteSettings.logoUrl || DEFAULT_LOGO_URL}
+              alt={`${siteSettings.siteName} লোগো`}
+              className={`w-11 h-11 object-contain ${isDefaultLogo ? 'scale-[1.55]' : ''}`}
               referrerPolicy="no-referrer"
             />
           </span>
-          <span className="text-lg font-bold tracking-tight text-[#7A0D14] whitespace-nowrap">
-            আপগ্রেড স্টাডি প্রোগ্রাম
+          <span className="text-lg font-bold tracking-tight text-[#7A0D14] whitespace-nowrap max-w-[210px] sm:max-w-[260px] truncate">
+            {siteSettings.siteName}
           </span>
         </button>
 
-        {/* Zone 2: Clean single-line text nav links */}
+        {/* Zone 2: Clean single-line text nav links (5 concise items) */}
         <nav
           aria-label="প্রধান নেভিগেশন"
           className="hidden md:flex items-center gap-7"
@@ -81,7 +84,11 @@ export function Navbar() {
           <button
             type="button"
             onClick={() => handleNavigate('admission')}
-            className="hidden sm:inline-flex items-center justify-center px-5 py-2.5 bg-[#7A0D14] text-white text-sm font-semibold rounded-lg hover:bg-[#5E090F] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A0D14]"
+            className={`hidden sm:inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A0D14] ${
+              activeView === 'admission'
+                ? 'bg-[#5E090F] text-white'
+                : 'bg-[#7A0D14] text-white hover:bg-[#5E090F]'
+            }`}
           >
             ভর্তি হোন
           </button>

@@ -24,18 +24,16 @@ test('every collection in firebase-blueprint.json has an explicit match block in
 });
 
 test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
-  // 1. Verified email requirement on admin bootstrap
   assert.match(rulesContent, /request\.auth\.token\.email_verified == true/);
-  // 2. Path ID validation helper enforced
   assert.match(rulesContent, /function isValidId\(id\)/);
-  // 3. No blanket isSignedIn() list rules on PII collections
   assert.doesNotMatch(rulesContent, /allow list:\s*if isSignedIn\(\);/);
-  // 4. Atomic payment-to-admission relational guard
-  assert.match(rulesContent, /existsAfter\(\/databases\/\$\(database\)\/documents\/admissions\/\$\(incoming\(\)\.admissionId\)\)/);
-  // 5. Server timestamp enforcement
+  assert.match(
+    rulesContent,
+    /existsAfter\(\/databases\/\$\(database\)\/documents\/admissions\/\$\(incoming\(\)\.admissionId\)\)/,
+  );
   assert.match(rulesContent, /incoming\(\)\.createdAt == request\.time/);
   assert.match(rulesContent, /incoming\(\)\.updatedAt == request\.time/);
-  // 6. Strict key checks (hasAll + hasOnly) on all entity validators
+
   const validators = [
     'isValidUserProfile',
     'isValidStaffMember',
@@ -43,6 +41,8 @@ test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
     'isValidRoutine',
     'isValidAdmission',
     'isValidPayment',
+    'isValidSiteSettings',
+    'isValidResult',
   ];
   for (const fn of validators) {
     assert.ok(rulesContent.includes(`function ${fn}(data)`), `Missing validator ${fn}`);
