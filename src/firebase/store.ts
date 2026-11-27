@@ -25,6 +25,7 @@ import type {
   AdmissionStatus,
   CustomSection,
   NoticeItem,
+  PaymentFormInput,
   PaymentRecord,
   PaymentStatus,
   ProofItem,
@@ -32,12 +33,15 @@ import type {
   SiteSettings,
   StaffInvite,
   StaffInviteFormInput,
+  StudentGender,
+  StudentRegistration,
+  StudentRegistrationFormInput,
   StudentResult,
   TransactionStatus,
   UserRole,
 } from '../types';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
-import { emailToInviteId, sanitizeText } from '../utils/academicLogic';
+import { emailToInviteId, normalizeStudentUsername, sanitizeText } from '../utils/academicLogic';
 import { createStudentAvatarSvg } from '../utils/imageUtils';
 
 function formatTimestamp(val: unknown): string {
@@ -442,6 +446,11 @@ export function subscribeAdmissions(
           ownerId: String(data.ownerId ?? ''),
           rollNumber: String(data.rollNumber ?? ''),
           studentName,
+          gender:
+            data.gender === 'ছেলে' || data.gender === 'মেয়ে'
+              ? (data.gender as StudentGender)
+              : undefined,
+          username: typeof data.username === 'string' && data.username ? data.username : undefined,
           fatherName: String(data.fatherName ?? data.guardianName ?? ''),
           motherName: String(data.motherName ?? ''),
           guardianName: String(data.guardianName ?? ''),
@@ -808,4 +817,210 @@ export async function removeStaffInviteInFirestore(inviteId: string): Promise<vo
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+function mapStudentRegistrationDoc(
+  uid: string,
+  data: Record<string, unknown>,
+): StudentRegistration {
+  const studentName = String(data.studentName ?? '');
+  return {
+    uid,
+    username: String(data.username ?? '').toLowerCase(),
+    studentName,
+    gender: data.gender === 'মেয়ে' ? 'মেয়ে' : 'ছেলে',
+    fatherName: String(data.fatherName ?? ''),
+    motherName: String(data.motherName ?? ''),
+    guardianPhone: String(data.guardianPhone ?? ''),
+    studentPhoto: String(data.studentPhoto || createStudentAvatarSvg(studentName, 0)),
+    classLevel: data.classLevel as StudentRegistration['classLevel'],
+    group: data.group as StudentRegistration['group'],
+    status: (data.status === 'approved' || data.status === 'rejected'
+      ? data.status
+      : 'pending') as StudentRegistration['status'],
+    rollNumber: String(data.rollNumber ?? ''),
+    admissionId: String(data.admissionId ?? ''),
+    createdAt: formatTimestamp(data.createdAt),
+    updatedAt: formatTimestamp(data.updatedAt),
+  };
+}
+
+export async function createStudentRegistrationInFirestore(
+  uid: string,
+  input: StudentRegistrationFormInput,
+): Promise<void> {
+  const path = `student_registrations/${uid}`;
+  const username = normalizeStudentUsername(input.username).slice(0, 32);
+  try {
+    await setDoc(doc(db, 'student_registrations', uid), {
+      uid,
+      username,
+      studentName: sanitizeText(input.studentName, 100),
+      gender: input.gender === 'মেয়ে' ? 'মেয়ে' : 'ছেলে',
+      fatherName: sanitizeText(input.fatherName, 100),
+      motherName: sanitizeText(input.motherName, 100),
+      guardianPhone: input.guardianPhone.replace(/[\s-]/g, '').slice(0, 15),
+      studentPhoto: input.studentPhoto.slice(0, 180000),
+      classLevel: input.classLevel,
+      group: input.group,
+      status: 'pending',
+      rollNumber: '',
+      admissionId: '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeOwnStudentRegistration(
+  uid: string,
+  onData: (registration: StudentRegistration | null) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = `student_registrations/${uid}`;
+  return onSnapshot(
+    doc(db, 'student_registrations', uid),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      onData(mapStudentRegistrationDoc(snap.id, snap.data() as Record<string, unknown>));
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export function subscribeAllStudentRegistrations(
+  onData: (registrations: StudentRegistration[]) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = 'student_registrations';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items = snapshot.docs
+        .map((d) => mapStudentRegistrationDoc(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+      onData(items);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export async function approveStudentRegistrationInFirestore(
+  reg: StudentRegistration,
+  rollNumber: string,
+  fees: { monthlyFee: number; admissionFee: number },
+): Promise<{ admissionId: string }> {
+  const admissionId = reg.admissionId || makeDocId('adm');
+  const batch = writeBatch(db);
+  const admissionRef = doc(db, 'admissions', admissionId);
+  const regRef = doc(db, 'student_registrations', reg.uid);
+
+  batch.set(admissionRef, {
+    ownerId: reg.uid,
+    rollNumber,
+    studentName: sanitizeText(reg.studentName, 100),
+    gender: reg.gender,
+    username: normalizeStudentUsername(reg.username).slice(0, 32),
+    fatherName: sanitizeText(reg.fatherName, 100),
+    motherName: sanitizeText(reg.motherName, 100),
+    guardianName: sanitizeText(reg.fatherName, 100),
+    guardianPhone: reg.guardianPhone.replace(/[\s-]/g, '').slice(0, 15),
+    studentPhone: '',
+    dateOfBirth: '',
+    presentAddress: '',
+    permanentAddress: '',
+    studentPhoto: (reg.studentPhoto || '').slice(0, 180000),
+    schoolName: 'আপগ্রেড স্টাডি প্রোগ্রাম (USP)',
+    classLevel: reg.classLevel,
+    group: reg.group,
+    batchShift: 'বিকাল (৩:০০ - ৬:০০)',
+    monthlyFee: fees.monthlyFee,
+    admissionFee: fees.admissionFee,
+    status: 'approved',
+    paymentStatus: 'unpaid',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  batch.update(regRef, {
+    status: 'approved',
+    rollNumber,
+    admissionId,
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+    return { admissionId };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `student_registrations/${reg.uid}`);
+  }
+}
+
+export async function rejectStudentRegistrationInFirestore(uid: string): Promise<void> {
+  const path = `student_registrations/${uid}`;
+  try {
+    await updateDoc(doc(db, 'student_registrations', uid), {
+      status: 'rejected',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function createStudentPortalPaymentInFirestore(
+  admission: AdmissionRecord,
+  paymentInput: PaymentFormInput,
+  amount: number,
+): Promise<string> {
+  const paymentId = makeDocId('pay');
+  const batch = writeBatch(db);
+
+  batch.set(doc(db, 'payments', paymentId), {
+    admissionId: admission.id,
+    ownerId: admission.ownerId,
+    studentName: sanitizeText(admission.studentName, 100),
+    rollNumber: admission.rollNumber,
+    classLevel: admission.classLevel,
+    amount,
+    method: paymentInput.method,
+    senderNumber: paymentInput.senderNumber.trim().slice(0, 24),
+    transactionId: paymentInput.transactionId.trim().toUpperCase().slice(0, 40),
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  if (admission.paymentStatus === 'unpaid') {
+    batch.update(doc(db, 'admissions', admission.id), {
+      paymentStatus: 'paid',
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  try {
+    await batch.commit();
+    return paymentId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `payments/${paymentId}`);
+  }
+}
+
 

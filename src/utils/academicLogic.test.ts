@@ -14,10 +14,13 @@ import {
   generateRollNumber,
   getAllowedGroupsForClass,
   groupStudentsByClass,
+  isStudentAuthEmail,
   maskEmailAddress,
+  normalizeStudentUsername,
   rankResultsWithMerit,
   resolveLoginEmail,
   ROLL_NUMBER_REGEX,
+  studentUsernameToAuthEmail,
   toBengaliDigits,
   validateAdmissionInput,
   validateCustomSectionInput,
@@ -32,6 +35,8 @@ import {
   validateSiteSettingsInput,
   validateStaffInput,
   validateStaffInviteInput,
+  validateStudentLoginInput,
+  validateStudentRegistrationInput,
   validateUsernameChange,
 } from './academicLogic';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
@@ -563,6 +568,72 @@ test('email-based delegated admin invite helpers validate and normalize cleanly'
     true,
   );
 });
+
+test('student registration & login validators enforce photo, class 9-11 groups, gender, username, and password match', () => {
+  assert.equal(normalizeStudentUsername('  Rafi_2026  '), 'rafi_2026');
+  assert.equal(
+    studentUsernameToAuthEmail('Rafi_2026'),
+    'rafi_2026@students.usp-academy.edu.bd',
+  );
+  assert.equal(isStudentAuthEmail('rafi_2026@students.usp-academy.edu.bd'), true);
+  assert.equal(isStudentAuthEmail('dark24dark24dark@gmail.com'), false);
+
+  const emptyResult = validateStudentRegistrationInput({
+    studentPhoto: '',
+    classLevel: '৯ম',
+    group: 'সাধারণ',
+    studentName: '',
+    gender: '',
+    fatherName: '',
+    motherName: '',
+    guardianPhone: '1234',
+    username: 'a',
+    password: '123',
+    confirmPassword: '456',
+  });
+  assert.equal(emptyResult.valid, false);
+  assert.ok(emptyResult.errors.studentPhoto);
+  assert.ok(emptyResult.errors.group);
+  assert.ok(emptyResult.errors.gender);
+  assert.ok(emptyResult.errors.guardianPhone);
+  assert.ok(emptyResult.errors.username);
+  assert.ok(emptyResult.errors.password);
+  assert.ok(emptyResult.errors.confirmPassword);
+
+  const validClass9 = validateStudentRegistrationInput({
+    studentPhoto: 'data:image/jpeg;base64,validphoto',
+    classLevel: '৯ম',
+    group: 'বিজ্ঞান',
+    studentName: 'তানভীর আহমেদ',
+    gender: 'ছেলে',
+    fatherName: 'মোঃ সাইফুল ইসলাম',
+    motherName: 'সালমা খাতুন',
+    guardianPhone: '01712345678',
+    username: 'tanvir_09',
+    password: 'Password123',
+    confirmPassword: 'Password123',
+  });
+  assert.equal(validClass9.valid, true);
+
+  const validClass7 = validateStudentRegistrationInput({
+    studentPhoto: 'data:image/jpeg;base64,validphoto',
+    classLevel: '৭ম',
+    group: 'সাধারণ',
+    studentName: 'সাদিয়া আফরিন',
+    gender: 'মেয়ে',
+    fatherName: 'আব্দুল হাকিম',
+    motherName: 'রোকসানা বেগম',
+    guardianPhone: '01812345678',
+    username: 'sadia-07',
+    password: 'Password123',
+    confirmPassword: 'Password123',
+  });
+  assert.equal(validClass7.valid, true);
+
+  assert.equal(validateStudentLoginInput('ab', '123').valid, false);
+  assert.equal(validateStudentLoginInput('tanvir_09', 'Password123').valid, true);
+});
+
 
 
 

@@ -6,7 +6,7 @@ import { Navbar } from './components/Navbar';
 import { HomeView } from './components/HomeView';
 import { ClassesRoutineView } from './components/ClassesRoutineView';
 import { NoticesView } from './components/NoticesView';
-import { ResultsView } from './components/ResultsView';
+import { StudentPortalView } from './components/StudentPortalView';
 import { AdmissionPaymentView } from './components/AdmissionPaymentView';
 import { DashboardView } from './components/DashboardView';
 import { Footer } from './components/Footer';
@@ -30,7 +30,7 @@ function PortalShell() {
             {activeView === 'home' && <HomeView />}
             {activeView === 'classes' && <ClassesRoutineView />}
             {activeView === 'notices' && <NoticesView />}
-            {activeView === 'results' && <ResultsView />}
+            {(activeView === 'student' || activeView === 'results') && <StudentPortalView />}
             {activeView === 'admission' && <AdmissionPaymentView />}
             {activeView === 'dashboard' && <DashboardView />}
           </motion.div>

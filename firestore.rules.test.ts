@@ -44,10 +44,15 @@ test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
     'isValidPayment',
     'isValidSiteSettings',
     'isValidResult',
+    'isValidStudentRegistration',
   ];
   for (const fn of validators) {
     assert.ok(rulesContent.includes(`function ${fn}(data)`), `Missing validator ${fn}`);
   }
   assert.match(rulesContent, /existing\(\)\.email == request\.auth\.token\.email\.lower\(\)/);
+  assert.match(
+    rulesContent,
+    /request\.auth\.token\.email\.lower\(\) == incoming\(\)\.username \+ '@students\.usp-academy\.edu\.bd'/,
+  );
 });
 

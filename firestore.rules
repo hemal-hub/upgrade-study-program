@@ -16,6 +16,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
+    function isStudentAuthUser() {
+      return isSignedIn() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.size() <= 80 &&
+        request.auth.token.email.lower().matches('^[a-z0-9_\\-]{3,32}@students\\.usp-academy\\.edu\\.bd$');
+    }
+
+    function isApprovedStudent() {
+      return isStudentAuthUser() &&
+        exists(/databases/$(database)/documents/student_registrations/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/student_registrations/$(request.auth.uid)).data.status == 'approved';
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -99,6 +112,26 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidStudentRegistration(data) {
+      return data.keys().hasAll(['uid', 'username', 'studentName', 'gender', 'fatherName', 'motherName', 'guardianPhone', 'studentPhoto', 'classLevel', 'group', 'status', 'rollNumber', 'admissionId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'username', 'studentName', 'gender', 'fatherName', 'motherName', 'guardianPhone', 'studentPhoto', 'classLevel', 'group', 'status', 'rollNumber', 'admissionId', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.username is string && data.username.size() >= 3 && data.username.size() <= 32 && data.username == data.username.lower() && data.username.matches('^[a-z0-9_\\-]+$') &&
+        data.studentName is string && data.studentName.size() >= 2 && data.studentName.size() <= 100 &&
+        data.gender is string && data.gender in ['ছেলে', 'মেয়ে'] &&
+        data.fatherName is string && data.fatherName.size() >= 2 && data.fatherName.size() <= 100 &&
+        data.motherName is string && data.motherName.size() >= 2 && data.motherName.size() <= 100 &&
+        data.guardianPhone is string && data.guardianPhone.size() >= 11 && data.guardianPhone.size() <= 15 && data.guardianPhone.matches('^01[3-9][0-9]{8}$') &&
+        data.studentPhoto is string && data.studentPhoto.size() >= 10 && data.studentPhoto.size() <= 180000 &&
+        isValidClassLevel(data.classLevel) &&
+        isValidGroup(data.group) &&
+        data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+        data.rollNumber is string && data.rollNumber.size() <= 32 &&
+        data.admissionId is string && data.admissionId.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidNotice(data) {
       return data.keys().hasAll(['title', 'body', 'category', 'targetClass', 'pinned', 'authorId', 'authorName', 'publishedDate', 'createdAt']) &&
         data.keys().hasOnly(['title', 'body', 'category', 'targetClass', 'pinned', 'authorId', 'authorName', 'publishedDate', 'createdAt']) &&
@@ -129,18 +162,20 @@ service cloud.firestore {
 
     function isValidAdmission(data) {
       return data.keys().hasAll(['ownerId', 'rollNumber', 'studentName', 'guardianName', 'guardianPhone', 'schoolName', 'classLevel', 'group', 'batchShift', 'monthlyFee', 'admissionFee', 'status', 'paymentStatus', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['ownerId', 'rollNumber', 'studentName', 'fatherName', 'motherName', 'guardianName', 'guardianPhone', 'studentPhone', 'dateOfBirth', 'presentAddress', 'permanentAddress', 'studentPhoto', 'schoolName', 'classLevel', 'group', 'batchShift', 'monthlyFee', 'admissionFee', 'status', 'paymentStatus', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'rollNumber', 'studentName', 'gender', 'username', 'fatherName', 'motherName', 'guardianName', 'guardianPhone', 'studentPhone', 'dateOfBirth', 'presentAddress', 'permanentAddress', 'studentPhoto', 'schoolName', 'classLevel', 'group', 'batchShift', 'monthlyFee', 'admissionFee', 'status', 'paymentStatus', 'createdAt', 'updatedAt']) &&
         isValidId(data.ownerId) &&
         data.rollNumber is string && data.rollNumber.size() >= 4 && data.rollNumber.size() <= 32 && data.rollNumber.matches('^USP-[0-9A-Z\\-]+$') &&
         data.studentName is string && data.studentName.size() >= 2 && data.studentName.size() <= 100 &&
+        (!('gender' in data) || (data.gender is string && data.gender in ['ছেলে', 'মেয়ে'])) &&
+        (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 32 && data.username == data.username.lower() && data.username.matches('^[a-z0-9_\\-]+$'))) &&
         (!('fatherName' in data) || (data.fatherName is string && data.fatherName.size() >= 2 && data.fatherName.size() <= 100)) &&
         (!('motherName' in data) || (data.motherName is string && data.motherName.size() >= 2 && data.motherName.size() <= 100)) &&
         data.guardianName is string && data.guardianName.size() >= 2 && data.guardianName.size() <= 100 &&
         data.guardianPhone is string && data.guardianPhone.size() >= 11 && data.guardianPhone.size() <= 15 && data.guardianPhone.matches('^01[3-9][0-9]{8}$') &&
         (!('studentPhone' in data) || (data.studentPhone is string && data.studentPhone.size() <= 15)) &&
-        (!('dateOfBirth' in data) || (data.dateOfBirth is string && data.dateOfBirth.size() >= 8 && data.dateOfBirth.size() <= 20 && data.dateOfBirth.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))) &&
-        (!('presentAddress' in data) || (data.presentAddress is string && data.presentAddress.size() >= 3 && data.presentAddress.size() <= 300)) &&
-        (!('permanentAddress' in data) || (data.permanentAddress is string && data.permanentAddress.size() >= 3 && data.permanentAddress.size() <= 300)) &&
+        (!('dateOfBirth' in data) || (data.dateOfBirth is string && data.dateOfBirth.size() <= 20)) &&
+        (!('presentAddress' in data) || (data.presentAddress is string && data.presentAddress.size() <= 300)) &&
+        (!('permanentAddress' in data) || (data.permanentAddress is string && data.permanentAddress.size() <= 300)) &&
         (!('studentPhoto' in data) || (data.studentPhoto is string && data.studentPhoto.size() <= 180000)) &&
         data.schoolName is string && data.schoolName.size() >= 2 && data.schoolName.size() <= 150 &&
         isValidClassLevel(data.classLevel) &&
@@ -239,7 +274,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isPrincipal());
       allow list: if isBootstrapPrincipal();
-      allow create: if isVerifiedUser() &&
+      allow create: if (isVerifiedUser() || isStudentAuthUser()) &&
         isValidId(userId) &&
         request.auth.uid == userId &&
         isValidUserProfile(incoming()) &&
@@ -304,6 +339,39 @@ service cloud.firestore {
       allow delete: if isBootstrapPrincipal() && isValidId(inviteId);
     }
 
+    // 2c. Student Login Registrations (PII isolated; student creates own pending request, Staff approves atomically into Admissions/Student List)
+    match /student_registrations/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isStaff());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isStaff());
+      allow create: if isStudentAuthUser() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidStudentRegistration(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        request.auth.token.email.lower() == incoming().username + '@students.usp-academy.edu.bd' &&
+        incoming().status == 'pending' &&
+        incoming().rollNumber == '' &&
+        incoming().admissionId == '' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidId(userId) &&
+        isValidStudentRegistration(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().username == existing().username &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isStaff() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'rollNumber', 'admissionId', 'updatedAt']) &&
+        (
+          incoming().status != 'approved' ||
+          (incoming().admissionId.size() >= 1 &&
+            incoming().rollNumber.size() >= 4 &&
+            existsAfter(/databases/$(database)/documents/admissions/$(incoming().admissionId)))
+        );
+      allow delete: if isBootstrapPrincipal() && isValidId(userId);
+    }
+
     // 3. Notices (Publicly readable; Principal/Teachers/Delegated Admins manage)
     match /notices/{noticeId} {
       allow get: if isValidId(noticeId);
@@ -344,19 +412,25 @@ service cloud.firestore {
       allow delete: if isVerifiedUser() && isValidId(routineId) && isStaff();
     }
 
-    // 5. Online Admissions (PII Isolated; owner or verified staff can list/manage)
+    // 5. Online Admissions & Approved Student List (PII Isolated; owner or verified staff can list/manage)
     match /admissions/{admissionId} {
       allow get: if isSignedIn() && isValidId(admissionId) && (existing().ownerId == request.auth.uid || isStaff());
       allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isStaff());
-      allow create: if isVerifiedUser() &&
-        isValidId(admissionId) &&
+      allow create: if isValidId(admissionId) &&
         isValidAdmission(incoming()) &&
-        incoming().ownerId == request.auth.uid &&
-        incoming().status == 'pending' &&
-        incoming().paymentStatus in ['unpaid', 'paid'] &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
-      allow update: if isVerifiedUser() &&
+        incoming().updatedAt == request.time &&
+        (
+          (isVerifiedUser() &&
+            incoming().ownerId == request.auth.uid &&
+            incoming().status == 'pending' &&
+            incoming().paymentStatus in ['unpaid', 'paid']) ||
+          (isStaff() &&
+            incoming().status == 'approved' &&
+            incoming().paymentStatus in ['unpaid', 'paid', 'verified'] &&
+            exists(/databases/$(database)/documents/student_registrations/$(incoming().ownerId)))
+        );
+      allow update: if (isVerifiedUser() || isApprovedStudent()) &&
         isValidId(admissionId) &&
         isValidAdmission(incoming()) &&
         incoming().ownerId == existing().ownerId &&
@@ -375,18 +449,19 @@ service cloud.firestore {
       allow delete: if isBootstrapPrincipal() && isValidId(admissionId);
     }
 
-    // 6. Payments (PII Isolated, Atomic Relational Integrity with Admission)
+    // 6. Payments (PII Isolated, Atomic Relational Integrity with Owned Admission)
     match /payments/{paymentId} {
       allow get: if isSignedIn() && isValidId(paymentId) && (existing().ownerId == request.auth.uid || isStaff());
       allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isStaff());
-      allow create: if isVerifiedUser() &&
+      allow create: if (isVerifiedUser() || isApprovedStudent()) &&
         isValidId(paymentId) &&
         isValidPayment(incoming()) &&
         incoming().ownerId == request.auth.uid &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        existsAfter(/databases/$(database)/documents/admissions/$(incoming().admissionId));
+        existsAfter(/databases/$(database)/documents/admissions/$(incoming().admissionId)) &&
+        getAfter(/databases/$(database)/documents/admissions/$(incoming().admissionId)).data.ownerId == request.auth.uid;
       allow update: if isVerifiedUser() &&
         isValidId(paymentId) &&
         isValidPayment(incoming()) &&
@@ -424,7 +499,7 @@ service cloud.firestore {
       allow delete: if isBootstrapPrincipal() && isValidId(settingId);
     }
 
-    // 8. Exam Results (Publicly readable; Staff/Admins publish and manage)
+    // 8. Exam Results (Readable in Student Panel & Admin; Staff/Admins publish and manage)
     match /results/{resultId} {
       allow get: if isValidId(resultId);
       allow list: if true;

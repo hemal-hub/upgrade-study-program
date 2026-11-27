@@ -60,10 +60,10 @@ export function Footer() {
               <li>
                 <button
                   type="button"
-                  onClick={() => goTo('results')}
+                  onClick={() => goTo('student')}
                   className="hover:text-[#7A0D14] transition-colors cursor-pointer"
                 >
-                  পরীক্ষার রেজাল্ট ও মেধাতালিকা
+                  Student Login (নোটিশ, রেজাল্ট ও পেমেন্ট)
                 </button>
               </li>
               <li>

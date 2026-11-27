@@ -9,7 +9,7 @@ const NAV_ITEMS: Array<{ id: AppView; label: string }> = [
   { id: 'home', label: 'হোম' },
   { id: 'classes', label: 'ক্লাস ও রুটিন' },
   { id: 'notices', label: 'নোটিশ' },
-  { id: 'results', label: 'রেজাল্ট' },
+  { id: 'student', label: 'Student Login' },
   { id: 'dashboard', label: 'ড্যাশবোর্ড' },
 ];
 

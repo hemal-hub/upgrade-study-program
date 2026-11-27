@@ -29,7 +29,18 @@ export type TransactionStatus = 'pending' | 'verified' | 'refunded';
 
 export type UserRole = 'student' | 'teacher' | 'principal';
 
-export type AppView = 'home' | 'classes' | 'notices' | 'results' | 'admission' | 'dashboard';
+export type StudentGender = 'ছেলে' | 'মেয়ে';
+
+export type StudentRegistrationStatus = 'pending' | 'approved' | 'rejected';
+
+export type AppView =
+  | 'home'
+  | 'classes'
+  | 'notices'
+  | 'results'
+  | 'student'
+  | 'admission'
+  | 'dashboard';
 
 export type GradeLetter = 'A+' | 'A' | 'A-' | 'B' | 'C' | 'D' | 'F';
 
@@ -130,6 +141,8 @@ export interface AdmissionRecord {
   ownerId: string;
   rollNumber: string;
   studentName: string;
+  gender?: StudentGender;
+  username?: string;
   fatherName: string;
   motherName: string;
   guardianName: string;
@@ -232,6 +245,38 @@ export interface StaffInviteFormInput {
   name: string;
   role: 'teacher' | 'principal';
   subject: string;
+}
+
+export interface StudentRegistration {
+  uid: string;
+  username: string;
+  studentName: string;
+  gender: StudentGender;
+  fatherName: string;
+  motherName: string;
+  guardianPhone: string;
+  studentPhoto: string;
+  classLevel: ClassLevel;
+  group: AcademicGroup;
+  status: StudentRegistrationStatus;
+  rollNumber: string;
+  admissionId: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface StudentRegistrationFormInput {
+  studentPhoto: string;
+  classLevel: ClassLevel;
+  group: AcademicGroup;
+  studentName: string;
+  gender: StudentGender | '';
+  fatherName: string;
+  motherName: string;
+  guardianPhone: string;
+  username: string;
+  password: string;
+  confirmPassword: string;
 }
 
 export interface AdmissionFormInput {

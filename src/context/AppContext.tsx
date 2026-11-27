@@ -22,18 +22,24 @@ import {
 import {
   addStaffInviteInFirestore,
   addStaffMemberInFirestore,
+  approveStudentRegistrationInFirestore,
   createAdmissionAndPaymentInFirestore,
   createNoticeInFirestore,
   createRoutineInFirestore,
+  createStudentPortalPaymentInFirestore,
+  createStudentRegistrationInFirestore,
   deleteNoticeInFirestore,
   deleteResultInFirestore,
   deleteRoutineInFirestore,
   ensureUserProfile,
   publishBatchResultsInFirestore,
+  rejectStudentRegistrationInFirestore,
   removeStaffInviteInFirestore,
   removeStaffMemberInFirestore,
   saveSiteSettingsInFirestore,
   subscribeAdmissions,
+  subscribeAllStudentRegistrations,
+  subscribeOwnStudentRegistration,
   subscribePayments,
   subscribePublicNotices,
   subscribePublicResults,
@@ -71,6 +77,8 @@ import type {
   StaffInvite,
   StaffInviteFormInput,
   StaffMember,
+  StudentRegistration,
+  StudentRegistrationFormInput,
   StudentResult,
   TransactionStatus,
   UserRole,
@@ -81,12 +89,18 @@ import {
   canAccessDashboard,
   canManageStaff,
   generateRollNumber,
+  isStudentAuthEmail,
   maskEmailAddress,
+  normalizeStudentUsername,
   resolveLoginEmail,
   sanitizeText,
+  studentUsernameToAuthEmail,
   toBengaliDigits,
   validatePasswordResetInput,
+  validatePaymentInput,
   validateStaffInviteInput,
+  validateStudentLoginInput,
+  validateStudentRegistrationInput,
   validateUsernameChange,
 } from '../utils/academicLogic';
 
@@ -148,6 +162,11 @@ interface AppContextValue {
   hasStaffAccess: boolean;
   isPrincipalAccess: boolean;
   isRootAdmin: boolean;
+  isStudentAccount: boolean;
+  isApprovedStudent: boolean;
+  ownStudentRegistration: StudentRegistration | null;
+  studentRegistrationLoaded: boolean;
+  studentRegistrations: StudentRegistration[];
   hasPasswordProvider: boolean;
   isCloudSynced: boolean;
   authError: string | null;
@@ -162,6 +181,15 @@ interface AppContextValue {
   refreshAuthUser: () => Promise<void>;
   changeAccountPassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
   updateAdminUsername: (newUsername: string) => Promise<string | null>;
+  registerStudentAccount: (input: StudentRegistrationFormInput) => Promise<string | null>;
+  signInStudent: (username: string, password: string) => Promise<string | null>;
+  approveStudentRegistration: (reg: StudentRegistration) => Promise<void>;
+  rejectStudentRegistration: (uid: string) => Promise<void>;
+  submitStudentPortalPayment: (
+    admission: AdmissionRecord,
+    paymentInput: PaymentFormInput,
+    amount: number,
+  ) => Promise<string | null>;
   signOutUser: () => Promise<void>;
   siteSettings: SiteSettings;
   updateSiteSettings: (nextSettings: SiteSettings) => Promise<void>;
@@ -240,6 +268,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [cloudPayments, setCloudPayments] = useState<PaymentRecord[]>([]);
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [staffInvites, setStaffInvites] = useState<StaffInvite[]>([]);
+  const [ownStudentRegistration, setOwnStudentRegistration] =
+    useState<StudentRegistration | null>(null);
+  const [studentRegistrationLoaded, setStudentRegistrationLoaded] = useState(false);
+  const [studentRegistrations, setStudentRegistrations] = useState<StudentRegistration[]>([]);
 
   // Local lists (Notice & Results intentionally start empty until explicitly published!)
   const [localNotices, setLocalNotices] = useState<NoticeItem[]>(SEED_NOTICES);
@@ -332,14 +364,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     Boolean(user?.emailVerified),
     userRole,
   );
+  const isStudentAccount = Boolean(user && isStudentAuthEmail(user.email));
+  const isApprovedStudent = Boolean(
+    user && !hasStaffAccess && ownStudentRegistration?.status === 'approved',
+  );
 
-  // Subscribe to private admissions, payments, and admin registries ONLY when authenticated
+  // Subscribe to private admissions, payments, student registrations, and admin registries ONLY when authenticated
   useEffect(() => {
     if (!authReady || !user) {
       setCloudAdmissions([]);
       setCloudPayments([]);
       setStaffMembers([]);
       setStaffInvites([]);
+      setOwnStudentRegistration(null);
+      setStudentRegistrationLoaded(false);
+      setStudentRegistrations([]);
       return;
     }
 
@@ -355,6 +394,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (items) => setCloudPayments(items),
       () => {},
     );
+    const unsubOwnStudentReg = !hasStaffAccess
+      ? subscribeOwnStudentRegistration(
+          user.uid,
+          (reg) => {
+            setOwnStudentRegistration(reg);
+            setStudentRegistrationLoaded(true);
+          },
+          () => {
+            setStudentRegistrationLoaded(true);
+          },
+        )
+      : undefined;
+    if (hasStaffAccess) {
+      setOwnStudentRegistration(null);
+      setStudentRegistrationLoaded(true);
+    }
+    const unsubAllStudentRegs = hasStaffAccess
+      ? subscribeAllStudentRegistrations(
+          (items) => setStudentRegistrations(items),
+          () => {},
+        )
+      : undefined;
     const unsubStaff = isRootAdmin
       ? subscribeStaffMembers(
           (items) => setStaffMembers(items),
@@ -371,6 +432,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       unsubAdmissions();
       unsubPayments();
+      unsubOwnStudentReg?.();
+      unsubAllStudentRegs?.();
       unsubStaff?.();
       unsubInvites?.();
     };
@@ -648,6 +711,128 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [isRootAdmin, showToast, siteSettings, user],
+  );
+
+  const registerStudentAccount = useCallback(
+    async (input: StudentRegistrationFormInput): Promise<string | null> => {
+      const validation = validateStudentRegistrationInput(input);
+      if (!validation.valid) {
+        return Object.values(validation.errors)[0] || 'অনুগ্রহ করে সকল তথ্য সঠিকভাবে পূরণ করুন।';
+      }
+
+      const normalizedUsername = normalizeStudentUsername(input.username);
+      const authEmail = studentUsernameToAuthEmail(normalizedUsername);
+
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, authEmail, input.password);
+        await createStudentRegistrationInFirestore(cred.user.uid, {
+          ...input,
+          username: normalizedUsername,
+        });
+        showToast(
+          'আপনার রেজিস্ট্রেশন আবেদন জমা হয়েছে! অ্যাডমিন অনুমোদন দিলে আপনি লগইন করতে পারবেন।',
+          'success',
+        );
+        return null;
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code ?? '')
+            : '';
+        if (code === 'auth/email-already-in-use') {
+          return 'এই ইউজারনেমটি আগে থেকেই ব্যবহৃত হয়েছে। অনুগ্রহ করে অন্য একটি ইউজারনেম বেছে নিন।';
+        }
+        return formatFirebaseAuthError(error);
+      }
+    },
+    [showToast],
+  );
+
+  const signInStudent = useCallback(
+    async (username: string, password: string): Promise<string | null> => {
+      const validation = validateStudentLoginInput(username, password);
+      if (!validation.valid) {
+        return Object.values(validation.errors)[0] || 'সঠিক ইউজারনেম ও পাসওয়ার্ড দিন।';
+      }
+
+      const authEmail = studentUsernameToAuthEmail(username);
+      try {
+        await signInWithEmailAndPassword(auth, authEmail, password);
+        showToast('সফলভাবে শিক্ষার্থী অ্যাকাউন্টে লগইন হয়েছে।', 'success');
+        return null;
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code ?? '')
+            : '';
+        if (
+          code === 'auth/invalid-credential' ||
+          code === 'auth/wrong-password' ||
+          code === 'auth/user-not-found'
+        ) {
+          return 'ইউজারনেম অথবা পাসওয়ার্ড সঠিক নয়।';
+        }
+        return formatFirebaseAuthError(error);
+      }
+    },
+    [showToast],
+  );
+
+  const approveStudentRegistration = useCallback(
+    async (reg: StudentRegistration) => {
+      if (!user || !hasStaffAccess) {
+        showToast('শিক্ষার্থী অনুমোদনের জন্য অ্যাডমিন লগইন আবশ্যক।', 'error');
+        return;
+      }
+      const fees = calculateFeeBreakdown(reg.classLevel, reg.group);
+      const rollNumber =
+        reg.rollNumber || generateRollNumber(reg.classLevel, admissions.length + 101, 2026);
+      await approveStudentRegistrationInFirestore(reg, rollNumber, fees);
+      showToast(
+        `${reg.studentName} (@${reg.username}) অনুমোদিত হয়েছে এবং Student List-এ সেভ হয়েছে (রোল: ${rollNumber})।`,
+        'success',
+      );
+    },
+    [admissions.length, hasStaffAccess, showToast, user],
+  );
+
+  const rejectStudentRegistration = useCallback(
+    async (uid: string) => {
+      if (!user || !hasStaffAccess) {
+        showToast('আবেদন বাতিলের জন্য অ্যাডমিন লগইন আবশ্যক।', 'error');
+        return;
+      }
+      await rejectStudentRegistrationInFirestore(uid);
+      showToast('শিক্ষার্থীর রেজিস্ট্রেশন আবেদন বাতিল করা হয়েছে।', 'info');
+    },
+    [hasStaffAccess, showToast, user],
+  );
+
+  const submitStudentPortalPayment = useCallback(
+    async (
+      admission: AdmissionRecord,
+      paymentInput: PaymentFormInput,
+      amount: number,
+    ): Promise<string | null> => {
+      if (!user || !isApprovedStudent) {
+        return 'পেমেন্ট জমা দিতে অনুমোদিত শিক্ষার্থী অ্যাকাউন্টে লগইন থাকতে হবে।';
+      }
+      const validation = validatePaymentInput(paymentInput);
+      if (!validation.valid) {
+        return Object.values(validation.errors)[0] || 'সঠিক পেমেন্ট তথ্য দিন।';
+      }
+      if (!Number.isFinite(amount) || amount < 500 || amount > 50000) {
+        return 'সঠিক ফি পরিমাণ নির্বাচন করুন।';
+      }
+      try {
+        await createStudentPortalPaymentInFirestore(admission, paymentInput, amount);
+        showToast('আপনার পেমেন্ট তথ্য জমা হয়েছে। অ্যাডমিন যাচাই করে অনুমোদন করবেন।', 'success');
+        return null;
+      } catch {
+        return 'পেমেন্ট জমা দেওয়া যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।';
+      }
+    },
+    [isApprovedStudent, showToast, user],
   );
 
   const signOutUser = useCallback(async () => {
@@ -1082,6 +1267,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     hasStaffAccess,
     isPrincipalAccess,
     isRootAdmin,
+    isStudentAccount,
+    isApprovedStudent,
+    ownStudentRegistration,
+    studentRegistrationLoaded,
+    studentRegistrations,
     hasPasswordProvider,
     isCloudSynced,
     authError,
@@ -1094,6 +1284,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshAuthUser,
     changeAccountPassword,
     updateAdminUsername,
+    registerStudentAccount,
+    signInStudent,
+    approveStudentRegistration,
+    rejectStudentRegistration,
+    submitStudentPortalPayment,
     signOutUser,
     siteSettings,
     updateSiteSettings,

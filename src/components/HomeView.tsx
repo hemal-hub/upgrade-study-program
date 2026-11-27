@@ -1,10 +1,10 @@
 import {
   ArrowRight,
-  Award,
   Bell,
   Calendar,
   ChevronRight,
   CreditCard,
+  LogIn,
   ShieldCheck,
   Users,
 } from 'lucide-react';
@@ -16,17 +16,14 @@ import {
   filterAndSortNotices,
   filterAndSortRoutines,
   formatBdt,
-  rankResultsWithMerit,
   toBengaliDigits,
 } from '../utils/academicLogic';
-import { createStudentAvatarSvg } from '../utils/imageUtils';
 
 export function HomeView() {
   const {
     siteSettings,
     notices,
     routines,
-    results,
     setActiveView,
     navigateToAdmissionForClass,
     navigateToClassesForLevel,
@@ -35,7 +32,6 @@ export function HomeView() {
   const vis = siteSettings.sectionVisibility;
   const topNotices = filterAndSortNotices(notices, {}).slice(0, 3);
   const featuredRoutines = filterAndSortRoutines(routines, {}).slice(0, 5);
-  const topResults = rankResultsWithMerit(results).slice(0, 4);
   const visibleCustomSections = siteSettings.customSections.filter((s) => s.visible);
 
   return (
@@ -84,17 +80,18 @@ export function HomeView() {
                 <button
                   type="button"
                   onClick={() => setActiveView('admission')}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-[#7A0D14] text-white text-[15px] font-semibold rounded-xl hover:bg-[#5E090F] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A0D14]"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[#7A0D14] text-white text-[15px] font-semibold rounded-xl hover:bg-[#5E090F] transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A0D14]"
                 >
                   <span>{siteSettings.primaryCtaText}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveView('classes')}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-white text-[#1C1917] text-[15px] font-semibold rounded-xl border border-[#D6CFC5] hover:border-[#7A0D14] hover:text-[#7A0D14] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  onClick={() => setActiveView('student')}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white text-[#7A0D14] text-[15px] font-semibold rounded-xl border border-[#7A0D14] hover:bg-[#7A0D14] hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A0D14]"
                 >
-                  <span>{siteSettings.secondaryCtaText}</span>
+                  <LogIn className="w-4 h-4" />
+                  <span>Student Login</span>
                 </button>
               </div>
             </div>
@@ -383,84 +380,6 @@ export function HomeView() {
         </section>
       )}
 
-      {/* Results Spotlight Section */}
-      {vis.resultsSpotlight && (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-white border border-[#E7E2DA] rounded-2xl p-6 sm:p-8 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-4 border-b border-[#F0EBE3]">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-[#B8862B]">ফলাফল ও মেধাতালিকা</p>
-                <h2 className="text-2xl font-bold text-[#1C1917]">প্রকাশিত পরীক্ষার রেজাল্ট</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveView('results')}
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#7A0D14] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <span>সকল শ্রেণির রেজাল্ট দেখুন</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {topResults.length === 0 ? (
-              <div className="py-8 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl px-6">
-                <div className="flex items-center gap-3">
-                  <Award className="w-6 h-6 text-[#B8862B] shrink-0" />
-                  <div>
-                    <p className="text-sm font-bold text-[#1C1917]">
-                      এখনো কোনো পরীক্ষার রেজাল্ট পাবলিশ হয়নি
-                    </p>
-                    <p className="text-xs text-[#57534E]">
-                      ফলাফল প্রকাশিত হলে শ্রেণিভিত্তিক মেধাতালিকা ও মার্কশিট এখান থেকেই দেখা যাবে।
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveView('results')}
-                  className="px-4 py-2 text-xs font-semibold text-[#7A0D14] bg-white border border-[#D6CFC5] rounded-lg hover:border-[#7A0D14] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  রেজাল্ট পাতা দেখুন
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {topResults.map((res, idx) => (
-                  <div
-                    key={res.id}
-                    className="bg-[#FAF8F5] border border-[#EFEAE2] rounded-xl p-4 space-y-3"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={res.studentPhoto || createStudentAvatarSvg(res.studentName, idx)}
-                        alt={res.studentName}
-                        className="w-12 h-12 rounded-lg object-cover border border-[#E7E2DA] shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-[#1C1917] truncate">
-                          {res.studentName}
-                        </p>
-                        <p className="text-xs text-[#78716C] truncate">
-                          {res.classLevel} শ্রেণি · #{toBengaliDigits(res.meritPosition)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-baseline justify-between text-xs pt-2 border-t border-[#E7E2DA]">
-                      <span className="text-[#57534E] truncate">{res.examName}</span>
-                      <span className="font-bold text-[#7A0D14] tabular-nums shrink-0">
-                        {res.grade} ({toBengaliDigits(res.obtainedMarks)}/
-                        {toBengaliDigits(res.fullMarks)})
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
       {/* Faculty & Digital Management Highlights */}
       {(vis.features || vis.faculty) && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
@@ -496,10 +415,10 @@ export function HomeView() {
                   </div>
                   <div className="bg-white border border-[#E7E2DA] rounded-xl p-5 space-y-2">
                     <Users className="w-5 h-5 text-[#7A0D14]" />
-                    <h3 className="text-base font-bold text-[#1C1917]">শিক্ষার্থী পোর্টাল ও রেজাল্ট</h3>
+                    <h3 className="text-base font-bold text-[#1C1917]">Student Panel (লগইন পোর্টাল)</h3>
                     <p className="text-sm text-[#57534E]">
-                      রোল নম্বর বা মোবাইল নম্বর দিয়ে ক্লাসের তথ্য, পেমেন্ট অবস্থা এবং পরীক্ষার
-                      মার্কশিট দেখা যায়।
+                      নিবন্ধিত শিক্ষার্থীরা ইউজারনেম ও পাসওয়ার্ড দিয়ে লগইন করে নোটিশ বোর্ড,
+                      পরীক্ষার রেজাল্ট ও অনলাইন পেমেন্ট পরিচালনা করতে পারে।
                     </p>
                   </div>
                   <div className="bg-white border border-[#E7E2DA] rounded-xl p-5 space-y-2">

@@ -47,11 +47,6 @@ const VISIBILITY_CONTROLS: Array<{
     desc: 'হোম পেইজের সর্বশেষ নোটিশ ও রুটিন সেকশন',
   },
   {
-    key: 'resultsSpotlight',
-    label: 'পরীক্ষার রেজাল্ট বোর্ড স্পটলাইট',
-    desc: 'প্রকাশিত পরীক্ষার ফলাফল ও মেধাক্রম প্রিভিউ',
-  },
-  {
     key: 'features',
     label: 'পাঠদান পদ্ধতি ও মূল বৈশিষ্ট্য',
     desc: 'কেন আমাদের প্রতিষ্ঠান সেরা তার বিবরণ',
@@ -73,7 +68,7 @@ const CTA_TARGET_OPTIONS: Array<{ value: CustomSectionCtaTarget; label: string }
   { value: 'admission', label: 'অনলাইন ভর্তি পেইজে যাবে' },
   { value: 'classes', label: 'ক্লাস ও রুটিন পেইজে যাবে' },
   { value: 'notices', label: 'নোটিশ বোর্ড পেইজে যাবে' },
-  { value: 'results', label: 'রেজাল্ট পেইজে যাবে' },
+  { value: 'results', label: 'Student Login পেইজে যাবে' },
 ];
 
 export function AdminCmsTab() {

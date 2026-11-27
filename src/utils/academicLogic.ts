@@ -21,6 +21,7 @@ import type {
   SiteSettings,
   StaffFormInput,
   StaffInviteFormInput,
+  StudentRegistrationFormInput,
   StudentResult,
   ValidationResult,
 } from '../types';
@@ -675,6 +676,101 @@ export function validateFirstTimeSetupInput(
     errors,
   };
 }
+
+export const STUDENT_AUTH_EMAIL_DOMAIN = 'students.usp-academy.edu.bd';
+export const STUDENT_USERNAME_REGEX = /^[a-z0-9_-]{3,32}$/;
+
+export function normalizeStudentUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+export function studentUsernameToAuthEmail(username: string): string {
+  return `${normalizeStudentUsername(username)}@${STUDENT_AUTH_EMAIL_DOMAIN}`;
+}
+
+export function isStudentAuthEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const cleaned = email.trim().toLowerCase();
+  const suffix = `@${STUDENT_AUTH_EMAIL_DOMAIN}`;
+  if (!cleaned.endsWith(suffix)) return false;
+  const local = cleaned.slice(0, -suffix.length);
+  return STUDENT_USERNAME_REGEX.test(local);
+}
+
+export function validateStudentRegistrationInput(
+  input: StudentRegistrationFormInput,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  const studentName = sanitizeText(input.studentName, 100);
+  const fatherName = sanitizeText(input.fatherName, 100);
+  const motherName = sanitizeText(input.motherName, 100);
+  const guardianPhone = input.guardianPhone.replace(/[\s-]/g, '');
+  const username = normalizeStudentUsername(input.username);
+  const allowedGroups = getAllowedGroupsForClass(input.classLevel);
+
+  if (
+    !input.studentPhoto ||
+    input.studentPhoto.trim().length < 10 ||
+    input.studentPhoto.length > 180000
+  ) {
+    errors.studentPhoto = 'শিক্ষার্থীর পাসপোর্ট সাইজের ছবি আপলোড করুন।';
+  }
+  if (!CLASS_LEVELS.includes(input.classLevel)) {
+    errors.classLevel = 'সঠিক শ্রেণি নির্বাচন করুন।';
+  }
+  if (!allowedGroups.includes(input.group)) {
+    errors.group =
+      input.classLevel === '৯ম' || input.classLevel === '১০ম' || input.classLevel === 'একাদশ'
+        ? '৯ম থেকে একাদশ শ্রেণির জন্য সঠিক বিভাগ (বিজ্ঞান, ব্যবসায় শিক্ষা বা মানবিক) নির্বাচন করুন।'
+        : 'এই শ্রেণির জন্য সাধারণ বিভাগ প্রযোজ্য।';
+  }
+  if (studentName.length < 2) {
+    errors.studentName = 'শিক্ষার্থীর পূর্ণ নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (input.gender !== 'ছেলে' && input.gender !== 'মেয়ে') {
+    errors.gender = 'ছেলে অথবা মেয়ে — যেকোনো একটিতে টিক চিহ্ন দিন।';
+  }
+  if (fatherName.length < 2) {
+    errors.fatherName = 'পিতার নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (motherName.length < 2) {
+    errors.motherName = 'মাতার নাম কমপক্ষে ২ অক্ষরের হতে হবে।';
+  }
+  if (!BD_PHONE_REGEX.test(guardianPhone)) {
+    errors.guardianPhone = 'সঠিক ১১ ডিজিটের বাংলাদেশি মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX)।';
+  }
+  if (!STUDENT_USERNAME_REGEX.test(username)) {
+    errors.username =
+      'ইউজারনেম ৩ থেকে ৩২ অক্ষরের হতে হবে (শুধুমাত্র ইংরেজি ছোট হাতের অক্ষর, সংখ্যা, _ অথবা -)।';
+  }
+  if (input.password.length < 8) {
+    errors.password = 'পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে।';
+  }
+  if (input.password !== input.confirmPassword) {
+    errors.confirmPassword = 'পাসওয়ার্ড এবং রি-টাইপ পাসওয়ার্ড মেলেনি।';
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+export function validateStudentLoginInput(username: string, password: string): ValidationResult {
+  const errors: Record<string, string> = {};
+  const normalized = normalizeStudentUsername(username);
+  if (!STUDENT_USERNAME_REGEX.test(normalized)) {
+    errors.username = 'সঠিক ইউজারনেম লিখুন (ইংরেজি অক্ষর, সংখ্যা, _ বা -)।';
+  }
+  if (password.length < 6) {
+    errors.password = 'সঠিক পাসওয়ার্ড লিখুন (কমপক্ষে ৬ অক্ষর)।';
+  }
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
 
 
 

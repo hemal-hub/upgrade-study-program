@@ -26,6 +26,8 @@ export function AdminStudentListTab() {
       const haystack = [
         adm.studentName,
         adm.rollNumber,
+        adm.username ?? '',
+        adm.gender ?? '',
         adm.fatherName,
         adm.motherName,
         adm.guardianName,
@@ -156,10 +158,17 @@ export function AdminStudentListTab() {
                     </div>
                     <h3 className="text-base font-bold text-[#1C1917] truncate">
                       {student.studentName}
+                      {student.gender ? ` (${student.gender})` : ''}
                     </h3>
                     <p className="text-xs text-[#57534E]">
                       {student.classLevel} শ্রেণি · {student.group} · {student.batchShift}
                     </p>
+                    {student.username && (
+                      <p className="text-xs text-[#44403C] font-mono-tabular">
+                        লগইন: <span className="font-semibold text-[#7A0D14]">@{student.username}</span>{' '}
+                        · পাসওয়ার্ড: •••••••• (সুরক্ষিত)
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -251,6 +260,20 @@ export function AdminStudentListTab() {
             </div>
 
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5 text-sm">
+              {selectedStudent.gender && (
+                <div className="pb-2.5 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">লিঙ্গ</dt>
+                  <dd className="font-semibold text-[#1C1917] mt-0.5">{selectedStudent.gender}</dd>
+                </div>
+              )}
+              {selectedStudent.username && (
+                <div className="pb-2.5 border-b border-[#F0EBE3]">
+                  <dt className="text-xs text-[#78716C]">Student Login তথ্য</dt>
+                  <dd className="font-semibold font-mono-tabular text-[#1C1917] mt-0.5">
+                    @{selectedStudent.username} · পাসওয়ার্ড সুরক্ষিত
+                  </dd>
+                </div>
+              )}
               <div className="pb-2.5 border-b border-[#F0EBE3]">
                 <dt className="text-xs text-[#78716C] flex items-center gap-1">
                   <User className="w-3.5 h-3.5" />

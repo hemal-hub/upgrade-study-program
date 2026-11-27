@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   Sliders,
   Trash2,
+  UserCheck,
   UserPlus,
   Users,
   X,
@@ -30,6 +31,7 @@ import { useApp } from '../context/AppContext';
 import { AdminAccountSecurityTab } from './admin/AdminAccountSecurityTab';
 import { AdminCmsTab } from './admin/AdminCmsTab';
 import { AdminResultsTab } from './admin/AdminResultsTab';
+import { AdminStudentApprovalTab } from './admin/AdminStudentApprovalTab';
 import { AdminStudentListTab } from './admin/AdminStudentListTab';
 import { createStudentAvatarSvg } from '../utils/imageUtils';
 import { BOOTSTRAP_PRINCIPAL_EMAIL } from '../firebase/config';
@@ -66,6 +68,7 @@ import {
 
 type DashboardTab =
   | 'overview'
+  | 'studentApprovals'
   | 'studentList'
   | 'students'
   | 'payments'
@@ -78,6 +81,7 @@ type DashboardTab =
 
 const BASE_SIDEBAR_ITEMS: Array<{ id: DashboardTab; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'সংক্ষিপ্ত চিত্র', icon: LayoutDashboard },
+  { id: 'studentApprovals', label: 'Student Login Approval', icon: UserCheck },
   { id: 'studentList', label: 'Student List', icon: GraduationCap },
   { id: 'students', label: 'ভর্তি অনুমোদন', icon: Users },
   { id: 'payments', label: 'পেমেন্ট লেজার', icon: CreditCard },
@@ -106,6 +110,7 @@ export function DashboardView() {
     signOutUser,
     setActiveView,
     admissions,
+    studentRegistrations,
     payments,
     routines,
     notices,
@@ -204,6 +209,11 @@ export function DashboardView() {
           ]
         : BASE_SIDEBAR_ITEMS,
     [isRootAdmin],
+  );
+
+  const pendingStudentRegCount = useMemo(
+    () => studentRegistrations.filter((r) => r.status === 'pending').length,
+    [studentRegistrations],
   );
 
   const metrics = useMemo(
@@ -829,10 +839,10 @@ export function DashboardView() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveView('admission')}
+              onClick={() => setActiveView('student')}
               className="px-5 py-2.5 text-sm font-semibold text-[#57534E] hover:text-[#7A0D14] transition-colors cursor-pointer"
             >
-              শিক্ষার্থী পোর্টালে যান
+              Student Login-এ যান
             </button>
           </div>
         </section>
@@ -938,10 +948,10 @@ export function DashboardView() {
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-1">
             <button
               type="button"
-              onClick={() => setActiveView('admission')}
+              onClick={() => setActiveView('student')}
               className="px-5 py-2.5 bg-[#7A0D14] text-white text-sm font-semibold rounded-xl hover:bg-[#5E090F] transition-colors cursor-pointer"
             >
-              অনলাইন ভর্তি ও শিক্ষার্থী পোর্টাল
+              Student Login পোর্টালে যান
             </button>
             <button
               type="button"
@@ -1013,7 +1023,12 @@ export function DashboardView() {
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  <span>{item.label}</span>
+                  <span>
+                    {item.label}
+                    {item.id === 'studentApprovals' && pendingStudentRegCount > 0
+                      ? ` (${toBengaliDigits(pendingStudentRegCount)})`
+                      : ''}
+                  </span>
                 </button>
               );
             })}
@@ -1137,6 +1152,8 @@ export function DashboardView() {
               </div>
             </div>
           )}
+
+          {activeTab === 'studentApprovals' && <AdminStudentApprovalTab />}
 
           {activeTab === 'studentList' && <AdminStudentListTab />}
 
