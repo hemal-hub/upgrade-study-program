@@ -584,6 +584,88 @@
         }
       },
       "required": ["uid", "username", "studentName", "gender", "fatherName", "motherName", "guardianPhone", "studentPhoto", "classLevel", "group", "status", "rollNumber", "admissionId", "createdAt", "updatedAt"]
+    },
+    "FacultyProfile": {
+      "title": "FacultyProfile",
+      "description": "Publicly displayed faculty/teacher and Principal profile with portrait photo, credentials, bio, and highlights.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "roleTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "qualification": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "experienceYears": {
+          "type": "number"
+        },
+        "photoUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180000
+        },
+        "isPrincipal": {
+          "type": "boolean"
+        },
+        "classesTaught": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "specialization": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 240
+        },
+        "bio": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 800
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "highlights": {
+          "type": "array"
+        },
+        "consultationTime": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "displayOrder": {
+          "type": "number"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "roleTitle", "subject", "qualification", "experienceYears", "photoUrl", "isPrincipal", "classesTaught", "specialization", "bio", "message", "highlights", "consultationTime", "displayOrder", "authorId", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -626,6 +708,10 @@
     "/student_registrations/{userId}": {
       "schema": { "$ref": "#/entities/StudentRegistration" },
       "description": "Student account registration requests for Student Panel access pending Admin approval."
+    },
+    "/faculty/{facultyId}": {
+      "schema": { "$ref": "#/entities/FacultyProfile" },
+      "description": "Public faculty panel profiles (Principal and subject-specialist teachers) managed by Staff/Admins."
     }
   }
 }

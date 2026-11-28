@@ -213,6 +213,34 @@ export interface FacultyMember {
   subject: string;
   qualification: string;
   experienceYears: number;
+  photoUrl: string;
+  isPrincipal?: boolean;
+  classesTaught: string;
+  specialization: string;
+  bio: string;
+  message?: string;
+  highlights: string[];
+  consultationTime: string;
+  displayOrder?: number;
+  authorId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FacultyFormInput {
+  name: string;
+  roleTitle: string;
+  subject: string;
+  qualification: string;
+  experienceYears: number;
+  photoUrl: string;
+  isPrincipal: boolean;
+  classesTaught: string;
+  specialization: string;
+  bio: string;
+  message: string;
+  highlightsText: string;
+  consultationTime: string;
 }
 
 export interface StaffMember {

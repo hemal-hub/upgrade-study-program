@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Award,
   Bell,
+  BookUser,
   Calendar,
   Check,
   Copy,
@@ -30,6 +31,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { AdminAccountSecurityTab } from './admin/AdminAccountSecurityTab';
 import { AdminCmsTab } from './admin/AdminCmsTab';
+import { AdminFacultyTab } from './admin/AdminFacultyTab';
 import { AdminResultsTab } from './admin/AdminResultsTab';
 import { AdminStudentApprovalTab } from './admin/AdminStudentApprovalTab';
 import { AdminStudentListTab } from './admin/AdminStudentListTab';
@@ -75,6 +77,7 @@ type DashboardTab =
   | 'results'
   | 'routines'
   | 'notices'
+  | 'faculty'
   | 'cms'
   | 'security'
   | 'staff';
@@ -88,6 +91,7 @@ const BASE_SIDEBAR_ITEMS: Array<{ id: DashboardTab; label: string; icon: typeof 
   { id: 'results', label: 'রেজাল্ট প্রকাশ', icon: Award },
   { id: 'routines', label: 'রুটিন প্রকাশ', icon: Calendar },
   { id: 'notices', label: 'নোটিশ প্রকাশ', icon: Bell },
+  { id: 'faculty', label: 'শিক্ষক প্যানেল', icon: BookUser },
   { id: 'cms', label: 'ওয়েবসাইট কনটেন্ট (CMS)', icon: Sliders },
   { id: 'security', label: 'লগইন ও পাসওয়ার্ড', icon: KeyRound },
 ];
@@ -1118,7 +1122,7 @@ export function DashboardView() {
               </section>
 
               {/* Quick Principal Actions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
                   onClick={() => setActiveTab('studentList')}
@@ -1141,6 +1145,17 @@ export function DashboardView() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setActiveTab('faculty')}
+                  className="bg-white border border-[#E7E2DA] rounded-xl p-5 text-left hover:border-[#7A0D14] transition-colors cursor-pointer"
+                >
+                  <p className="text-sm font-bold text-[#7A0D14]">শিক্ষক প্যানেল ব্যবস্থাপনা</p>
+                  <p className="text-xs text-[#57534E] mt-1">
+                    প্রধান শিক্ষক ও বিষয়ভিত্তিক শিক্ষকদের ছবি, তথ্য, বাণী পরিবর্তন বা নতুন শিক্ষক যুক্ত
+                    করুন।
+                  </p>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setActiveTab('cms')}
                   className="bg-white border border-[#E7E2DA] rounded-xl p-5 text-left hover:border-[#7A0D14] transition-colors cursor-pointer"
                 >
@@ -1158,6 +1173,8 @@ export function DashboardView() {
           {activeTab === 'studentList' && <AdminStudentListTab />}
 
           {activeTab === 'results' && <AdminResultsTab />}
+
+          {activeTab === 'faculty' && <AdminFacultyTab />}
 
           {activeTab === 'cms' && <AdminCmsTab />}
 

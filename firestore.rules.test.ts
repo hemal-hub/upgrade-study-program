@@ -45,6 +45,7 @@ test('Dirty Dozen security invariants are encoded in firestore.rules', () => {
     'isValidSiteSettings',
     'isValidResult',
     'isValidStudentRegistration',
+    'isValidFacultyProfile',
   ];
   for (const fn of validators) {
     assert.ok(rulesContent.includes(`function ${fn}(data)`), `Missing validator ${fn}`);

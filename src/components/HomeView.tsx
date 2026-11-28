@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
-import { CLASS_PROGRAMS, DEFAULT_BANNER_URL, FACULTY_MEMBERS } from '../data/seedData';
+import { CLASS_PROGRAMS, DEFAULT_BANNER_URL } from '../data/seedData';
 import type { AppView } from '../types';
 import {
   filterAndSortNotices,
@@ -18,6 +18,8 @@ import {
   formatBdt,
   toBengaliDigits,
 } from '../utils/academicLogic';
+import { CampusMapSection } from './CampusMapSection';
+import { FacultyPanelSection } from './FacultyPanelSection';
 
 export function HomeView() {
   const {
@@ -434,34 +436,13 @@ export function HomeView() {
             </div>
           )}
 
-          {/* Senior Faculty Strip */}
-          {vis.faculty && (
-            <div>
-              <div className="mb-6 space-y-1">
-                <p className="text-sm font-semibold text-[#B8862B]">আমাদের শিক্ষকমণ্ডলী</p>
-                <h2 className="text-2xl sm:text-3xl font-bold text-[#1C1917]">
-                  অভিজ্ঞ ও বিষয়ভিত্তিক শিক্ষক প্যানেল
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                {FACULTY_MEMBERS.map((member) => (
-                  <div
-                    key={member.id}
-                    className="bg-white border border-[#E7E2DA] rounded-xl p-5 space-y-2"
-                  >
-                    <p className="text-xs font-semibold text-[#7A0D14]">{member.roleTitle}</p>
-                    <h3 className="text-base font-bold text-[#1C1917]">{member.name}</h3>
-                    <p className="text-sm font-medium text-[#44403C]">{member.subject}</p>
-                    <p className="text-xs text-[#78716C] leading-relaxed">
-                      {member.qualification} · {toBengaliDigits(member.experienceYears)} বছরের অভিজ্ঞতা
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Distinguished Faculty Panel (Principal Monograph + Subject-Specialist Gallery) */}
+          {vis.faculty && <FacultyPanelSection />}
         </section>
       )}
+
+      {/* Interactive Google Maps Campus Location & Directions */}
+      <CampusMapSection />
     </div>
   );
 }

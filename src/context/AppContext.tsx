@@ -28,6 +28,7 @@ import {
   createRoutineInFirestore,
   createStudentPortalPaymentInFirestore,
   createStudentRegistrationInFirestore,
+  deleteFacultyMemberInFirestore,
   deleteNoticeInFirestore,
   deleteResultInFirestore,
   deleteRoutineInFirestore,
@@ -36,11 +37,14 @@ import {
   rejectStudentRegistrationInFirestore,
   removeStaffInviteInFirestore,
   removeStaffMemberInFirestore,
+  saveFacultyMemberInFirestore,
   saveSiteSettingsInFirestore,
+  setPrincipalFacultyInFirestore,
   subscribeAdmissions,
   subscribeAllStudentRegistrations,
   subscribeOwnStudentRegistration,
   subscribePayments,
+  subscribePublicFaculty,
   subscribePublicNotices,
   subscribePublicResults,
   subscribePublicRoutines,
@@ -52,6 +56,7 @@ import {
 } from '../firebase/store';
 import {
   DEFAULT_SITE_SETTINGS,
+  FACULTY_MEMBERS,
   SEED_ADMISSIONS,
   SEED_NOTICES,
   SEED_PAYMENTS,
@@ -64,6 +69,8 @@ import type {
   AdmissionStatus,
   AppView,
   ClassLevel,
+  FacultyFormInput,
+  FacultyMember,
   NoticeFormInput,
   NoticeItem,
   PaymentFormInput,
@@ -103,6 +110,7 @@ import {
   validateStudentRegistrationInput,
   validateUsernameChange,
 } from '../utils/academicLogic';
+import { sortFacultyMembers, validateFacultyInput } from '../utils/facultyUtils';
 import { getPathForAppView, parseAppViewFromLocation } from '../utils/urlRouting';
 
 function formatFirebaseAuthError(error: unknown): string {
@@ -194,6 +202,10 @@ interface AppContextValue {
   signOutUser: () => Promise<void>;
   siteSettings: SiteSettings;
   updateSiteSettings: (nextSettings: SiteSettings) => Promise<void>;
+  facultyMembers: FacultyMember[];
+  saveFacultyMember: (input: FacultyFormInput, editingId?: string) => Promise<string | null>;
+  setPrincipalFaculty: (id: string) => Promise<void>;
+  removeFacultyMember: (id: string) => Promise<void>;
   notices: NoticeItem[];
   routines: RoutineEntry[];
   results: StudentResult[];
@@ -290,6 +302,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
 
   // Remote Firestore lists
+  const [cloudFaculty, setCloudFaculty] = useState<FacultyMember[]>([]);
   const [cloudNotices, setCloudNotices] = useState<NoticeItem[]>([]);
   const [cloudRoutines, setCloudRoutines] = useState<RoutineEntry[]>([]);
   const [cloudResults, setCloudResults] = useState<StudentResult[]>([]);
@@ -350,10 +363,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, []);
 
-  // Subscribe to public collections (site settings, notices, routines, results)
+  // Subscribe to public collections (site settings, faculty, notices, routines, results)
   useEffect(() => {
     const unsubSettings = subscribePublicSiteSettings(
       (settings) => setSiteSettings(settings),
+      () => {},
+    );
+    const unsubFaculty = subscribePublicFaculty(
+      (items) => setCloudFaculty(items),
       () => {},
     );
     const unsubNotices = subscribePublicNotices(
@@ -370,11 +387,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     );
     return () => {
       unsubSettings();
+      unsubFaculty();
       unsubNotices();
       unsubRoutines();
       unsubResults();
     };
   }, []);
+
+  const facultyMembers = useMemo(
+    () => sortFacultyMembers(cloudFaculty.length > 0 ? cloudFaculty : FACULTY_MEMBERS),
+    [cloudFaculty],
+  );
 
   const isRootAdmin = Boolean(
     user?.emailVerified && user.email?.toLowerCase() === BOOTSTRAP_PRINCIPAL_EMAIL.toLowerCase(),
@@ -1284,6 +1307,87 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [isRootAdmin, showToast, user],
   );
 
+  const saveFacultyMember = useCallback(
+    async (input: FacultyFormInput, editingId?: string): Promise<string | null> => {
+      if (!user || !hasStaffAccess) {
+        const msg = 'শিক্ষক প্যানেল সম্পাদনা করতে অনুমোদিত অ্যাডমিন লগইন প্রয়োজন।';
+        showToast(msg, 'error');
+        return msg;
+      }
+      const validation = validateFacultyInput(input);
+      if (!validation.valid) {
+        return Object.values(validation.errors)[0] || 'অনুগ্রহ করে সকল তথ্য সঠিকভাবে পূরণ করুন।';
+      }
+      try {
+        await saveFacultyMemberInFirestore({
+          editingId,
+          input,
+          authorId: user.uid,
+          existingCloudFaculty: cloudFaculty,
+          defaultSeedFaculty: FACULTY_MEMBERS,
+        });
+        showToast(
+          editingId
+            ? `${input.name.trim()}-এর তথ্য ও ছবি সফলভাবে আপডেট হয়েছে।`
+            : `${input.name.trim()}-কে শিক্ষক প্যানেলে যুক্ত করা হয়েছে।`,
+          'success',
+        );
+        return null;
+      } catch {
+        const msg = 'শিক্ষকের তথ্য সংরক্ষণ করা যায়নি। ছবির সাইজ বা ইন্টারনেট সংযোগ যাচাই করে আবার চেষ্টা করুন।';
+        showToast(msg, 'error');
+        return msg;
+      }
+    },
+    [cloudFaculty, hasStaffAccess, showToast, user],
+  );
+
+  const setPrincipalFaculty = useCallback(
+    async (id: string) => {
+      if (!user || !hasStaffAccess) {
+        showToast('প্রধান শিক্ষক পরিবর্তন করতে অনুমোদিত অ্যাডমিন লগইন প্রয়োজন।', 'error');
+        return;
+      }
+      try {
+        await setPrincipalFacultyInFirestore({
+          targetId: id,
+          authorId: user.uid,
+          existingCloudFaculty: cloudFaculty,
+          defaultSeedFaculty: FACULTY_MEMBERS,
+        });
+        showToast('প্রধান শিক্ষক সফলভাবে নির্ধারণ করা হয়েছে। হোম পেইজে নতুন ডিজাইনে প্রদর্শিত হবে।', 'success');
+      } catch {
+        showToast('প্রধান শিক্ষক আপডেট করা যায়নি। আবার চেষ্টা করুন।', 'error');
+      }
+    },
+    [cloudFaculty, hasStaffAccess, showToast, user],
+  );
+
+  const removeFacultyMember = useCallback(
+    async (id: string) => {
+      if (!user || !hasStaffAccess) {
+        showToast('শিক্ষক মুছে ফেলতে অনুমোদিত অ্যাডমিন লগইন প্রয়োজন।', 'error');
+        return;
+      }
+      if (facultyMembers.length <= 1) {
+        showToast('শিক্ষক প্যানেলে কমপক্ষে একজন শিক্ষক থাকা আবশ্যক।', 'error');
+        return;
+      }
+      try {
+        await deleteFacultyMemberInFirestore({
+          targetId: id,
+          authorId: user.uid,
+          existingCloudFaculty: cloudFaculty,
+          defaultSeedFaculty: FACULTY_MEMBERS,
+        });
+        showToast('শিক্ষকের প্রোফাইল প্যানেল থেকে মুছে ফেলা হয়েছে।', 'info');
+      } catch {
+        showToast('শিক্ষকের প্রোফাইল মুছে ফেলা যায়নি। আবার চেষ্টা করুন।', 'error');
+      }
+    },
+    [cloudFaculty, facultyMembers.length, hasStaffAccess, showToast, user],
+  );
+
   const value: AppContextValue = {
     activeView,
     setActiveView,
@@ -1321,6 +1425,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     signOutUser,
     siteSettings,
     updateSiteSettings,
+    facultyMembers,
+    saveFacultyMember,
+    setPrincipalFaculty,
+    removeFacultyMember,
     notices,
     routines,
     results,

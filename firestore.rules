@@ -268,6 +268,29 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidFacultyProfile(data) {
+      return data.keys().hasAll(['name', 'roleTitle', 'subject', 'qualification', 'experienceYears', 'photoUrl', 'isPrincipal', 'classesTaught', 'specialization', 'bio', 'message', 'highlights', 'consultationTime', 'displayOrder', 'authorId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'roleTitle', 'subject', 'qualification', 'experienceYears', 'photoUrl', 'isPrincipal', 'classesTaught', 'specialization', 'bio', 'message', 'highlights', 'consultationTime', 'displayOrder', 'authorId', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.roleTitle is string && data.roleTitle.size() >= 2 && data.roleTitle.size() <= 100 &&
+        data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 100 &&
+        data.qualification is string && data.qualification.size() >= 2 && data.qualification.size() <= 160 &&
+        data.experienceYears is number && data.experienceYears >= 0 && data.experienceYears <= 60 &&
+        data.photoUrl is string && data.photoUrl.size() >= 1 && data.photoUrl.size() <= 180000 &&
+        data.isPrincipal is bool &&
+        data.classesTaught is string && data.classesTaught.size() >= 2 && data.classesTaught.size() <= 120 &&
+        data.specialization is string && data.specialization.size() >= 2 && data.specialization.size() <= 240 &&
+        data.bio is string && data.bio.size() >= 5 && data.bio.size() <= 800 &&
+        data.message is string && data.message.size() <= 400 &&
+        data.highlights is list && data.highlights.size() <= 6 &&
+        (data.highlights.size() == 0 || (data.highlights[0] is string && data.highlights[0].size() <= 160)) &&
+        data.consultationTime is string && data.consultationTime.size() <= 120 &&
+        data.displayOrder is number && data.displayOrder >= 0 && data.displayOrder <= 1000 &&
+        isValidId(data.authorId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     // 1. User Profiles (PII isolated to owner or principal)
@@ -519,6 +542,28 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['examName', 'subject', 'fullMarks', 'obtainedMarks', 'gpa', 'grade', 'remarks', 'publishedDate', 'studentPhoto', 'updatedAt']) &&
         isStaff();
       allow delete: if isVerifiedUser() && isValidId(resultId) && isStaff();
+    }
+
+    // 9. Public Faculty Panel (Publicly readable; verified Staff/Admins create, update, and delete)
+    match /faculty/{facultyId} {
+      allow get: if isValidId(facultyId);
+      allow list: if true;
+      allow create: if isVerifiedUser() &&
+        isValidId(facultyId) &&
+        isValidFacultyProfile(incoming()) &&
+        incoming().authorId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isStaff();
+      allow update: if isVerifiedUser() &&
+        isValidId(facultyId) &&
+        isValidFacultyProfile(incoming()) &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'roleTitle', 'subject', 'qualification', 'experienceYears', 'photoUrl', 'isPrincipal', 'classesTaught', 'specialization', 'bio', 'message', 'highlights', 'consultationTime', 'displayOrder', 'updatedAt']) &&
+        isStaff();
+      allow delete: if isVerifiedUser() && isValidId(facultyId) && isStaff();
     }
   }
 }

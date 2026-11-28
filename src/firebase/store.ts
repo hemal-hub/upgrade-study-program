@@ -24,6 +24,8 @@ import type {
   AdmissionRecord,
   AdmissionStatus,
   CustomSection,
+  FacultyFormInput,
+  FacultyMember,
   NoticeItem,
   PaymentFormInput,
   PaymentRecord,
@@ -42,6 +44,7 @@ import type {
 } from '../types';
 import { DEFAULT_SITE_SETTINGS } from '../data/seedData';
 import { emailToInviteId, normalizeStudentUsername, sanitizeText } from '../utils/academicLogic';
+import { parseHighlightsText, sortFacultyMembers } from '../utils/facultyUtils';
 import { createStudentAvatarSvg } from '../utils/imageUtils';
 
 function formatTimestamp(val: unknown): string {
@@ -1020,6 +1023,319 @@ export async function createStudentPortalPaymentInFirestore(
     return paymentId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `payments/${paymentId}`);
+  }
+}
+
+function mapFacultyDoc(id: string, data: Record<string, unknown>): FacultyMember {
+  const highlights = Array.isArray(data.highlights)
+    ? data.highlights
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .slice(0, 6)
+    : [];
+
+  return {
+    id,
+    name: String(data.name ?? ''),
+    roleTitle: String(data.roleTitle ?? ''),
+    subject: String(data.subject ?? ''),
+    qualification: String(data.qualification ?? ''),
+    experienceYears:
+      typeof data.experienceYears === 'number' && Number.isFinite(data.experienceYears)
+        ? Math.max(0, Math.min(60, Math.round(data.experienceYears)))
+        : 0,
+    photoUrl: String(data.photoUrl ?? ''),
+    isPrincipal: Boolean(data.isPrincipal),
+    classesTaught: String(data.classesTaught ?? ''),
+    specialization: String(data.specialization ?? ''),
+    bio: String(data.bio ?? ''),
+    message: String(data.message ?? ''),
+    highlights,
+    consultationTime: String(data.consultationTime ?? ''),
+    displayOrder:
+      typeof data.displayOrder === 'number' && Number.isFinite(data.displayOrder)
+        ? data.displayOrder
+        : 999,
+    authorId: String(data.authorId ?? ''),
+    createdAt: formatTimestamp(data.createdAt),
+    updatedAt: formatTimestamp(data.updatedAt),
+  };
+}
+
+function buildFacultyCreatePayload(
+  source: {
+    name: string;
+    roleTitle: string;
+    subject: string;
+    qualification: string;
+    experienceYears: number;
+    photoUrl: string;
+    isPrincipal: boolean;
+    classesTaught: string;
+    specialization: string;
+    bio: string;
+    message: string;
+    highlights: string[];
+    consultationTime: string;
+    displayOrder: number;
+  },
+  authorId: string,
+) {
+  return {
+    name: sanitizeText(source.name, 100),
+    roleTitle: sanitizeText(source.roleTitle, 100),
+    subject: sanitizeText(source.subject, 100),
+    qualification: sanitizeText(source.qualification, 160),
+    experienceYears: Math.max(0, Math.min(60, Math.round(Number(source.experienceYears) || 0))),
+    photoUrl: source.photoUrl.trim().slice(0, 180000),
+    isPrincipal: Boolean(source.isPrincipal),
+    classesTaught: sanitizeText(source.classesTaught, 120),
+    specialization: sanitizeText(source.specialization, 240),
+    bio: sanitizeText(source.bio, 800),
+    message: sanitizeText(source.message || '', 400),
+    highlights: source.highlights.slice(0, 6).map((item) => sanitizeText(item, 160)),
+    consultationTime: sanitizeText(source.consultationTime || '', 120),
+    displayOrder: Math.max(0, Math.min(1000, Math.round(source.displayOrder))),
+    authorId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+export function subscribePublicFaculty(
+  onData: (members: FacultyMember[]) => void,
+  onErr?: (err: Error) => void,
+): Unsubscribe {
+  const path = 'faculty';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items = snapshot.docs.map((d) =>
+        mapFacultyDoc(d.id, d.data() as Record<string, unknown>),
+      );
+      onData(sortFacultyMembers(items));
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onErr?.(wrapped as Error);
+      }
+    },
+  );
+}
+
+export async function saveFacultyMemberInFirestore(params: {
+  editingId?: string;
+  input: FacultyFormInput;
+  authorId: string;
+  existingCloudFaculty: FacultyMember[];
+  defaultSeedFaculty: FacultyMember[];
+}): Promise<string> {
+  const { editingId, input, authorId, existingCloudFaculty, defaultSeedFaculty } = params;
+  const highlights = parseHighlightsText(input.highlightsText);
+  const targetId = editingId || makeDocId('fac');
+  const batch = writeBatch(db);
+  const isFirstCloudWrite = existingCloudFaculty.length === 0;
+  const existsInCloud = existingCloudFaculty.some((f) => f.id === targetId);
+
+  if (isFirstCloudWrite) {
+    defaultSeedFaculty.forEach((seed, idx) => {
+      if (seed.id === targetId) return;
+      batch.set(
+        doc(db, 'faculty', seed.id),
+        buildFacultyCreatePayload(
+          {
+            name: seed.name,
+            roleTitle: seed.roleTitle,
+            subject: seed.subject,
+            qualification: seed.qualification,
+            experienceYears: seed.experienceYears,
+            photoUrl: seed.photoUrl,
+            isPrincipal: input.isPrincipal ? false : Boolean(seed.isPrincipal),
+            classesTaught: seed.classesTaught,
+            specialization: seed.specialization,
+            bio: seed.bio,
+            message: seed.message ?? '',
+            highlights: seed.highlights ?? [],
+            consultationTime: seed.consultationTime ?? '',
+            displayOrder: seed.displayOrder ?? idx,
+          },
+          authorId,
+        ),
+      );
+    });
+  } else if (input.isPrincipal) {
+    existingCloudFaculty.forEach((member) => {
+      if (member.id !== targetId && member.isPrincipal) {
+        batch.update(doc(db, 'faculty', member.id), {
+          isPrincipal: false,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  }
+
+  const nextOrder = existsInCloud
+    ? (existingCloudFaculty.find((m) => m.id === targetId)?.displayOrder ?? 10)
+    : isFirstCloudWrite
+      ? (defaultSeedFaculty.findIndex((s) => s.id === targetId) >= 0
+          ? defaultSeedFaculty.findIndex((s) => s.id === targetId)
+          : defaultSeedFaculty.length)
+      : existingCloudFaculty.reduce((max, item) => Math.max(max, item.displayOrder ?? 0), -1) + 1;
+
+  if (existsInCloud) {
+    batch.update(doc(db, 'faculty', targetId), {
+      name: sanitizeText(input.name, 100),
+      roleTitle: sanitizeText(input.roleTitle, 100),
+      subject: sanitizeText(input.subject, 100),
+      qualification: sanitizeText(input.qualification, 160),
+      experienceYears: Math.max(0, Math.min(60, Math.round(Number(input.experienceYears) || 0))),
+      photoUrl: input.photoUrl.trim().slice(0, 180000),
+      isPrincipal: Boolean(input.isPrincipal),
+      classesTaught: sanitizeText(input.classesTaught, 120),
+      specialization: sanitizeText(input.specialization, 240),
+      bio: sanitizeText(input.bio, 800),
+      message: sanitizeText(input.message || '', 400),
+      highlights: highlights.slice(0, 6).map((item) => sanitizeText(item, 160)),
+      consultationTime: sanitizeText(input.consultationTime || '', 120),
+      displayOrder: Math.max(0, Math.min(1000, Math.round(nextOrder))),
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    batch.set(
+      doc(db, 'faculty', targetId),
+      buildFacultyCreatePayload(
+        {
+          name: input.name,
+          roleTitle: input.roleTitle,
+          subject: input.subject,
+          qualification: input.qualification,
+          experienceYears: input.experienceYears,
+          photoUrl: input.photoUrl,
+          isPrincipal: Boolean(input.isPrincipal),
+          classesTaught: input.classesTaught,
+          specialization: input.specialization,
+          bio: input.bio,
+          message: input.message || '',
+          highlights,
+          consultationTime: input.consultationTime || '',
+          displayOrder: nextOrder,
+        },
+        authorId,
+      ),
+    );
+  }
+
+  try {
+    await batch.commit();
+    return targetId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `faculty/${targetId}`);
+  }
+}
+
+export async function setPrincipalFacultyInFirestore(params: {
+  targetId: string;
+  authorId: string;
+  existingCloudFaculty: FacultyMember[];
+  defaultSeedFaculty: FacultyMember[];
+}): Promise<void> {
+  const { targetId, authorId, existingCloudFaculty, defaultSeedFaculty } = params;
+  const batch = writeBatch(db);
+
+  if (existingCloudFaculty.length === 0) {
+    defaultSeedFaculty.forEach((seed, idx) => {
+      batch.set(
+        doc(db, 'faculty', seed.id),
+        buildFacultyCreatePayload(
+          {
+            name: seed.name,
+            roleTitle: seed.roleTitle,
+            subject: seed.subject,
+            qualification: seed.qualification,
+            experienceYears: seed.experienceYears,
+            photoUrl: seed.photoUrl,
+            isPrincipal: seed.id === targetId,
+            classesTaught: seed.classesTaught,
+            specialization: seed.specialization,
+            bio: seed.bio,
+            message: seed.message ?? '',
+            highlights: seed.highlights ?? [],
+            consultationTime: seed.consultationTime ?? '',
+            displayOrder: seed.displayOrder ?? idx,
+          },
+          authorId,
+        ),
+      );
+    });
+  } else {
+    existingCloudFaculty.forEach((member) => {
+      const shouldBePrincipal = member.id === targetId;
+      if (Boolean(member.isPrincipal) !== shouldBePrincipal) {
+        batch.update(doc(db, 'faculty', member.id), {
+          isPrincipal: shouldBePrincipal,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `faculty/${targetId}`);
+  }
+}
+
+export async function deleteFacultyMemberInFirestore(params: {
+  targetId: string;
+  authorId: string;
+  existingCloudFaculty: FacultyMember[];
+  defaultSeedFaculty: FacultyMember[];
+}): Promise<void> {
+  const { targetId, authorId, existingCloudFaculty, defaultSeedFaculty } = params;
+
+  if (existingCloudFaculty.length === 0) {
+    const remaining = defaultSeedFaculty.filter((seed) => seed.id !== targetId);
+    const hasPrincipal = remaining.some((item) => item.isPrincipal);
+    const batch = writeBatch(db);
+    remaining.forEach((seed, idx) => {
+      batch.set(
+        doc(db, 'faculty', seed.id),
+        buildFacultyCreatePayload(
+          {
+            name: seed.name,
+            roleTitle: seed.roleTitle,
+            subject: seed.subject,
+            qualification: seed.qualification,
+            experienceYears: seed.experienceYears,
+            photoUrl: seed.photoUrl,
+            isPrincipal: hasPrincipal ? Boolean(seed.isPrincipal) : idx === 0,
+            classesTaught: seed.classesTaught,
+            specialization: seed.specialization,
+            bio: seed.bio,
+            message: seed.message ?? '',
+            highlights: seed.highlights ?? [],
+            consultationTime: seed.consultationTime ?? '',
+            displayOrder: seed.displayOrder ?? idx,
+          },
+          authorId,
+        ),
+      );
+    });
+    try {
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `faculty/${targetId}`);
+    }
+    return;
+  }
+
+  const path = `faculty/${targetId}`;
+  try {
+    await deleteDoc(doc(db, 'faculty', targetId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
