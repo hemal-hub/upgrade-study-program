@@ -103,6 +103,7 @@ import {
   validateStudentRegistrationInput,
   validateUsernameChange,
 } from '../utils/academicLogic';
+import { getPathForAppView, parseAppViewFromLocation } from '../utils/urlRouting';
 
 function formatFirebaseAuthError(error: unknown): string {
   const code =
@@ -250,8 +251,36 @@ function formatBengaliToday(): string {
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [activeView, setActiveView] = useState<AppView>('home');
+  const [activeView, setActiveViewState] = useState<AppView>(() => {
+    if (typeof window === 'undefined') return 'home';
+    return parseAppViewFromLocation(window.location.pathname, window.location.hash);
+  });
   const [preselectedClass, setPreselectedClass] = useState<ClassLevel>('৯ম');
+
+  const setActiveView = useCallback((nextView: AppView) => {
+    setActiveViewState(nextView);
+    if (typeof window !== 'undefined') {
+      const targetPath = getPathForAppView(nextView);
+      if (window.location.pathname !== targetPath || window.location.hash) {
+        window.history.pushState(null, '', targetPath);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncFromLocation = () => {
+      setActiveViewState(
+        parseAppViewFromLocation(window.location.pathname, window.location.hash),
+      );
+    };
+    window.addEventListener('popstate', syncFromLocation);
+    window.addEventListener('hashchange', syncFromLocation);
+    return () => {
+      window.removeEventListener('popstate', syncFromLocation);
+      window.removeEventListener('hashchange', syncFromLocation);
+    };
+  }, []);
 
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);

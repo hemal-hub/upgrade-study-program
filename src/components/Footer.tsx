@@ -75,15 +75,6 @@ export function Footer() {
                   অনলাইন ভর্তি ও পেমেন্ট
                 </button>
               </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => goTo('dashboard')}
-                  className="hover:text-[#7A0D14] transition-colors cursor-pointer"
-                >
-                  শিক্ষক ও প্রধান শিক্ষক ড্যাশবোর্ড
-                </button>
-              </li>
             </ul>
           </div>
 

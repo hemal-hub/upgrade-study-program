@@ -10,7 +10,6 @@ const NAV_ITEMS: Array<{ id: AppView; label: string }> = [
   { id: 'classes', label: 'ক্লাস ও রুটিন' },
   { id: 'notices', label: 'নোটিশ' },
   { id: 'student', label: 'Student Login' },
-  { id: 'dashboard', label: 'ড্যাশবোর্ড' },
 ];
 
 export function Navbar() {
